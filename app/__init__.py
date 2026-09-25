@@ -1,0 +1,1 @@
+"""NEGROSKY LOYALTY V2."""
