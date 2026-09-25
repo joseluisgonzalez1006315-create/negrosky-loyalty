@@ -6,4 +6,3 @@ httpx==0.28.1
 qrcode[pil]==8.0
 cryptography==44.0.2
 pywebpush==2.0.3
-psycopg[binary]==3.2.3
