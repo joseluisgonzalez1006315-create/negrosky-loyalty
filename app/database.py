@@ -108,8 +108,10 @@ class _PostgresConnection:
         return cursor
 
     def executemany(self, statement, params_seq):
-        raw = self._raw.executemany(self._sql(statement), params_seq)
-        return _CompatCursor(raw, self)
+        # psycopg ejecuta operaciones por lote desde un cursor, no desde Connection.
+        with self._raw.cursor() as raw:
+            raw.executemany(self._sql(statement), params_seq)
+            return _CompatCursor(raw, self)
 
     def commit(self):
         return self._raw.commit()
