@@ -5,14 +5,14 @@ from .security import hash_password
 
 MODULES = ("loyalty", "appointments", "time_sales", "notifications", "public_page", "raffles", "roulette", "collaborations")
 BUSINESSES = [
-    ("PIZZAS", "pizzas", "food", "#f97316", "#9a3412", "Pizzas, combos y domicilios", (1,0,0,1,1,1,1,1)),
-    ("Santuario Granizados", "santuario", "food", "#06b6d4", "#164e63", "Granizados, bebidas y premios", (1,1,0,1,1,1,0,1)),
     ("Café Aurora", "cafe-aurora", "coffee", "#c084fc", "#6d28d9", "Café artesanal, postres y desayunos", (1,1,0,1,1,0,0,1)),
     ("Barbería Norte", "barberia-norte", "beauty", "#38bdf8", "#0f172a", "Cortes, barba y cuidado masculino", (1,1,0,1,1,0,0,0)),
     ("Spa Luna", "spa-luna", "beauty", "#fb7185", "#be185d", "Bienestar, masajes y tratamientos", (1,1,0,1,1,0,0,1)),
     ("Gym Titan", "gym-titan", "fitness", "#22c55e", "#14532d", "Entrenamiento y vida saludable", (1,0,1,1,1,0,1,0)),
+    ("Pizzas Nova", "pizzas-nova", "food", "#f97316", "#9a3412", "Pizzas, combos y domicilios", (1,0,0,1,1,1,1,1)),
     ("Moda Viva", "moda-viva", "retail", "#facc15", "#a16207", "Moda, accesorios y novedades", (1,0,0,1,1,1,0,1)),
     ("Mundo Mascotas", "mundo-mascotas", "pets", "#14b8a6", "#115e59", "Alimentos, baño y cuidado de mascotas", (1,1,0,1,1,0,1,1)),
+    ("Eventos Valle", "eventos-valle", "premium", "#a78bfa", "#312e81", "Decoración, eventos y celebraciones", (1,1,1,1,1,0,0,1)),
 ]
 
 def seed_many_businesses():
