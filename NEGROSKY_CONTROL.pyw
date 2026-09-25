@@ -8,10 +8,6 @@ import sys
 import time
 import urllib.request
 import webbrowser
-import tempfile
-import zipfile
-import shutil
-import threading
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -24,9 +20,8 @@ BACKUPS = ROOT / "backups"
 ERROR_LOG = ROOT / "servidor_error.log"
 OUTPUT_LOG = ROOT / "servidor_salida.log"
 PORT = 8030
-CURRENT_VERSION = "3.0.56"
-CURRENT_BUILD = "056"
-GITHUB_ARCHIVE = "https://github.com/joseluisgonzalez1006315-create/negrosky-loyalty/archive/refs/heads/main.zip"
+CURRENT_VERSION = "3.0.55"
+CURRENT_BUILD = "055"
 
 
 def python_path():
@@ -164,7 +159,6 @@ class Control(tk.Tk):
             ("▶ Iniciar", self.start_server), ("■ Detener", self.stop_server),
             ("↻ Reiniciar", self.restart_server), ("🌐 Abrir administración", lambda: webbrowser.open(f"http://127.0.0.1:{PORT}")),
             ("💾 Crear respaldo", self.backup),
-            ("⬆ Actualizar", self.update_from_github),
         ]:
             ttk.Button(actions, text=text, command=command).pack(side="left", padx=(0, 7), pady=5)
         ttk.Label(shell, text="Direcciones para PC y celular", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(18, 7))
@@ -292,43 +286,6 @@ class Control(tk.Tk):
     def restart_server(self):
         self.stop_server()
         self.after(900, self.start_server)
-
-    def update_from_github(self):
-        if not messagebox.askyesno("Actualizar NEGROSKY", "Se creará un respaldo y se instalará la versión disponible en GitHub. ¿Continuar?"):
-            return
-        for button in self.winfo_children():
-            pass
-        self.status_label.config(text="● DESCARGANDO ACTUALIZACIÓN…", foreground="#c084fc")
-        threading.Thread(target=self._update_worker, daemon=True).start()
-
-    def _update_worker(self):
-        try:
-            if DB_FILE.exists():
-                self.backup()
-            with tempfile.TemporaryDirectory(prefix="negrosky_update_") as temp:
-                archive = Path(temp) / "update.zip"
-                urllib.request.urlretrieve(GITHUB_ARCHIVE, archive)
-                extract = Path(temp) / "extract"
-                with zipfile.ZipFile(archive) as zf:
-                    zf.extractall(extract)
-                roots = list(extract.iterdir())
-                source = roots[0] if len(roots) == 1 and roots[0].is_dir() else extract
-                for item in source.iterdir():
-                    if item.name in {"data", "backups", ".git", ".negrosky-server.pid", "venv"}:
-                        continue
-                    destination = ROOT / item.name
-                    if item.is_dir():
-                        destination.mkdir(exist_ok=True)
-                        for child in item.rglob("*"):
-                            relative = child.relative_to(item)
-                            target = destination / relative
-                            if child.is_dir(): target.mkdir(parents=True, exist_ok=True)
-                            else: target.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(child, target)
-                    else:
-                        shutil.copy2(item, destination)
-            self.after(0, lambda: (self.refresh(), messagebox.showinfo("NEGROSKY", "Actualización instalada correctamente. El servidor se reiniciará."), self.restart_server()))
-        except Exception as exc:
-            self.after(0, lambda: (self.refresh(), messagebox.showerror("Actualización", f"No se pudo actualizar: {exc}")))
 
     def backup(self):
         if not DB_FILE.exists():
