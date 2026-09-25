@@ -4339,16 +4339,25 @@ def public_raffle_numbers(slug:str,raffle_id:int):
 
 @app.get("/api/raffles/tickets/pending")
 def pending_raffle_tickets(tenant_id:int|None=None,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):
+    # Consulta portable: SQLite y PostgreSQL almacenan ticket_ids_json como texto.
+    # Evita json_each(), que solo existe en SQLite.
     with connection() as con:
         scope=None if user["role"]=="super_admin" and tenant_id is None else tenant_scope(user,tenant_id)
-        sql="""SELECT t.*,r.name raffle_name,r.tenant_id,
-            (SELECT x.code FROM raffle_operation_tokens x
-             WHERE x.raffle_id=t.raffle_id AND EXISTS (SELECT 1 FROM json_each(x.ticket_ids_json) j WHERE CAST(j.value AS INTEGER)=t.id)
-             AND x.used_at IS NULL AND x.rejected_at IS NULL LIMIT 1) AS operation_code
-            FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE t.status='pending'"""
+        sql="SELECT t.*,r.name raffle_name,r.tenant_id FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE t.status='pending'"
         args=[]
         if scope is not None: sql += " AND r.tenant_id=?"; args.append(scope)
-        return [row_dict(x) for x in con.execute(sql+" ORDER BY t.id DESC",args).fetchall()]
+        rows=[row_dict(x) for x in con.execute(sql+" ORDER BY t.id DESC",args).fetchall()]
+        tokens=con.execute("SELECT raffle_id,code,ticket_ids_json FROM raffle_operation_tokens WHERE used_at IS NULL AND rejected_at IS NULL").fetchall()
+        for row in rows:
+            row["operation_code"]=None
+            for tok in tokens:
+                if tok["raffle_id"]==row["raffle_id"]:
+                    try:
+                        if row["id"] in [int(v) for v in json.loads(tok["ticket_ids_json"] or "[]")]:
+                            row["operation_code"]=tok["code"]; break
+                    except (TypeError,ValueError,json.JSONDecodeError):
+                        pass
+        return rows
 
 @app.delete("/api/raffles/tickets/{ticket_id}")
 def reject_raffle_ticket(ticket_id:int,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):
