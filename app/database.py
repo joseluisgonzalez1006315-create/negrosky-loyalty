@@ -5,17 +5,153 @@ import unicodedata
 import base64
 from contextlib import contextmanager
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "negrosky_v2.db"
+
+try:
+    import psycopg
+    INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
+except ImportError:
+    INTEGRITY_ERRORS = (sqlite3.IntegrityError,)
 
 
 def database_path() -> Path:
     return Path(os.getenv("NEGROSKY_DB_PATH", str(DEFAULT_DB)))
 
 
+def postgres_url() -> str | None:
+    """URL de PostgreSQL para el despliegue cloud, si fue configurada."""
+    return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+
+
+def using_postgres() -> bool:
+    return bool(postgres_url())
+
+
+class _CompatRow(dict):
+    """Fila compatible con row[0] y row['nombre'] usada por la versión SQLite."""
+    def __init__(self, columns, values):
+        super().__init__(zip(columns, values))
+        self._values = tuple(values)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class _CompatCursor:
+    def __init__(self, raw, connection):
+        self._raw = raw
+        self._connection = connection
+        self._lastrowid = None
+
+    @property
+    def lastrowid(self):
+        return self._lastrowid
+
+    @property
+    def rowcount(self):
+        return self._raw.rowcount
+
+    def fetchone(self):
+        return self._raw.fetchone()
+
+    def fetchall(self):
+        return self._raw.fetchall()
+
+    def __iter__(self):
+        return iter(self._raw)
+
+
+class _PostgresConnection:
+    """Pequeña capa de transición para conservar el SQL parametrizado actual."""
+    def __init__(self, raw):
+        self._raw = raw
+
+    @staticmethod
+    def _sql(statement: str) -> str:
+        statement = statement.replace("BEGIN IMMEDIATE", "BEGIN")
+        statement = statement.replace("last_insert_rowid()", "(SELECT lastval())")
+        statement = statement.replace("strftime('%Y-%m-%d %H:%M:%f','now')", "CURRENT_TIMESTAMP")
+        statement = re.sub(
+            r"GROUP_CONCAT\(([^,()]+),\s*'([^']*)'\)",
+            r"string_agg((\1)::text, '\2')",
+            statement,
+            flags=re.I,
+        )
+        statement = re.sub(
+            r"GROUP_CONCAT\(([^()]+)\)",
+            r"string_agg((\1)::text, ',')",
+            statement,
+            flags=re.I,
+        )
+        statement = re.sub(r"\b([a-zA-Z_][a-zA-Z0-9_]*) IS %s", r"\1 IS NOT DISTINCT FROM %s", statement)
+        statement = statement.replace("?", "%s")
+        # SQLite permite INSERT OR IGNORE; PostgreSQL expresa lo mismo así.
+        if re.match(r"\s*INSERT\s+OR\s+IGNORE\s+INTO\b", statement, re.I):
+            statement = re.sub(r"(\s*INSERT)\s+OR\s+IGNORE(\s+INTO\b)", r"\1\2", statement, count=1, flags=re.I)
+            statement = statement.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+        return statement
+
+    def execute(self, statement, params=()):
+        sql = self._sql(statement)
+        raw = self._raw.execute(sql, params)
+        cursor = _CompatCursor(raw, self)
+        if re.match(r"\s*INSERT\s+INTO\b", sql, re.I) and " RETURNING " not in sql.upper():
+            try:
+                cursor._lastrowid = self._raw.execute("SELECT lastval()").fetchone()[0]
+            except Exception:
+                cursor._lastrowid = None
+        return cursor
+
+    def executemany(self, statement, params_seq):
+        # psycopg ejecuta operaciones por lote desde un cursor, no desde Connection.
+        with self._raw.cursor() as raw:
+            raw.executemany(self._sql(statement), params_seq)
+            return _CompatCursor(raw, self)
+
+    def commit(self):
+        return self._raw.commit()
+
+    def rollback(self):
+        return self._raw.rollback()
+
+    def close(self):
+        return self._raw.close()
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
 @contextmanager
 def connection():
+    if using_postgres():
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Falta instalar psycopg[binary] para usar PostgreSQL") from exc
+
+        def row_factory(cursor):
+            def make_row(values):
+                columns = [item.name for item in cursor.description]
+                return _CompatRow(columns, values)
+            return make_row
+
+        con = psycopg.connect(postgres_url(), row_factory=row_factory)
+        wrapped = _PostgresConnection(con)
+        try:
+            yield wrapped
+            wrapped.commit()
+        except Exception:
+            wrapped.rollback()
+            raise
+        finally:
+            wrapped.close()
+        return
+
     path = database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
@@ -32,6 +168,10 @@ def connection():
 
 
 def init_db() -> None:
+    # La base cloud se crea y versiona mediante migraciones de Supabase.
+    # No ejecutamos el script SQLite contra PostgreSQL.
+    if using_postgres():
+        return
     with connection() as con:
         con.executescript(
             """
