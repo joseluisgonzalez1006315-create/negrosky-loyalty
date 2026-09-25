@@ -897,7 +897,7 @@ def customer_directory_page():
 def public_business_directory():
     init_db()
     with connection() as con:
-        tenants = con.execute("SELECT id,name,slug FROM tenants WHERE status='active' AND deleted_at IS NULL ORDER BY name COLLATE NOCASE").fetchall()
+        tenants = con.execute("SELECT id,name,slug FROM tenants WHERE status='active' AND deleted_at IS NULL ORDER BY LOWER(name)").fetchall()
         result = []
         for tenant in tenants:
             if not module_enabled(con, tenant["id"], "public_page"):
@@ -1234,7 +1234,7 @@ def dashboard(user=Depends(current_user)):
 def list_tenants(user=Depends(current_user)):
     with connection() as con:
         if user["role"] == "super_admin":
-            rows = con.execute("SELECT * FROM tenants ORDER BY status='active' DESC, name COLLATE NOCASE").fetchall()
+            rows = con.execute("SELECT * FROM tenants ORDER BY status='active' DESC, LOWER(name)").fetchall()
         else:
             rows = con.execute("SELECT * FROM tenants WHERE id=?", (user["tenant_id"],)).fetchall()
     return [row_dict(r) for r in rows]
@@ -1768,7 +1768,7 @@ def reset_branding(tenant_id: int | None = None,
 def list_branches(tenant_id: int | None = None, user=Depends(current_user)):
     scope = tenant_scope(user, tenant_id)
     with connection() as con:
-        rows = con.execute("SELECT * FROM branches WHERE tenant_id=? ORDER BY status='active' DESC, name COLLATE NOCASE", (scope,)).fetchall()
+        rows = con.execute("SELECT * FROM branches WHERE tenant_id=? ORDER BY status='active' DESC, LOWER(name)", (scope,)).fetchall()
     return [row_dict(r) for r in rows]
 
 
@@ -3739,7 +3739,7 @@ def collaboration_contacts(tenant_id: int | None = None, user=Depends(require("s
             FROM tenants t
             LEFT JOIN collaboration_contacts c ON c.tenant_id=t.id
             LEFT JOIN business_branding bb ON bb.tenant_id=t.id
-            WHERE t.status='active' AND t.deleted_at IS NULL AND t.id<>? AND COALESCE(c.visible,0)=1 ORDER BY t.name COLLATE NOCASE""", (scope,)).fetchall()
+            WHERE t.status='active' AND t.deleted_at IS NULL AND t.id<>? AND COALESCE(c.visible,0)=1 ORDER BY t.LOWER(name)""", (scope,)).fetchall()
     return [row_dict(row) for row in rows]
 
 @app.get("/api/collaborations/contact")
