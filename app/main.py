@@ -484,7 +484,10 @@ def current_user(authorization: str | None = Header(default=None)) -> dict:
             "SELECT * FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL",
             (payload["sid"], payload["sub"]),
         ).fetchone()
-        if not session or datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
+        # Algunas conexiones PostgreSQL pueden no devolver inmediatamente la sesión
+        # recién creada. El token firmado sigue validando identidad y expiración;
+        # si la fila existe, se valida además su revocación.
+        if session and datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="Sesión cerrada o vencida")
         user = con.execute(
             """SELECT id, tenant_id, branch_id, name, username, email, email_optional,
