@@ -1,5 +1,4 @@
 import base64
-import asyncio
 import json
 import os
 import sqlite3
@@ -22,7 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .database import connection, database_path, init_db, INTEGRITY_ERRORS, using_postgres
+from .database import connection, database_path, init_db
 from .schemas import (
     BranchInput, CustomerIdentifyInput, LoginInput, LoyaltyProgramInput,
     OperationTokenInput, RewardBatchInput, TenantInput, TenantUpdate, UserInput, ValidateOperationInput, LoyaltyProgramUpdate, LoyaltyProgramStatusUpdate,
@@ -100,15 +99,9 @@ def normalize_search(value: str) -> str:
 
 BACKUPS = ROOT / "backups"
 BACKUP_EXTERNAL_DIRS = ("storage", "uploads", "media", "assets", "resources", "files")
-AUTOMATIC_BACKUP_DB = "negrosky_automatico.db"
-AUTOMATIC_BACKUP_ZIP = "negrosky_automatico.zip"
-NOTIFICATION_RETENTION_DAYS = 30
-_maintenance_task = None
 
 
 def create_backup(label="manual"):
-    if using_postgres():
-        return create_postgres_backup(label)
     BACKUPS.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_label = re.sub(r"[^a-z]+", "", label.lower()) or "manual"
@@ -152,125 +145,8 @@ def create_backup(label="manual"):
                         "size": item.stat().st_size,
                     })
         # Escribir el manifiesto al final para incluir el inventario real.
-        # El manifiesto se escribe después de recorrer los recursos para que
-        # también contenga el inventario real de imágenes y archivos.
-        manifest["external_files"] = external_files
         bundle.writestr("backup_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     return target
-
-
-def create_postgres_backup(label="manual"):
-    """Exporta la base PostgreSQL completa dentro de un ZIP portable."""
-    BACKUPS.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_label = re.sub(r"[^a-z]+", "", label.lower()) or "manual"
-    archive = BACKUPS / f"negrosky_{stamp}_{safe_label}.zip"
-    with connection() as con:
-        table_rows = con.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name"
-        ).fetchall()
-        tables = {}
-        for row in table_rows:
-            table = row[0]
-            records = con.execute(f'SELECT * FROM "{table}"').fetchall()
-            tables[table] = [row_dict(item) for item in records]
-    payload = json.dumps({"engine": "postgresql", "tables": tables},
-                         ensure_ascii=False, default=str).encode("utf-8")
-    manifest = {
-        "format": "negrosky-loyalty-full-backup-postgres-v1",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "database": "database/postgres_data.json",
-        "database_size": len(payload),
-        "embedded_images": True,
-        "external_directories": list(BACKUP_EXTERNAL_DIRS),
-        "external_files": [],
-    }
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
-        bundle.writestr("database/postgres_data.json", payload)
-        for directory_name in BACKUP_EXTERNAL_DIRS:
-            directory = ROOT / directory_name
-            if not directory.is_dir():
-                continue
-            for item in directory.rglob("*"):
-                if item.is_file():
-                    relative = item.relative_to(directory).as_posix()
-                    bundle.write(item, arcname=f"files/{directory_name}/{relative}")
-                    manifest["external_files"].append({
-                        "path": f"{directory_name}/{relative}",
-                        "size": item.stat().st_size,
-                    })
-        bundle.writestr("backup_manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-    return archive
-
-
-def create_automatic_backup():
-    """Crea una única copia automática y reemplaza la anterior de forma segura."""
-    BACKUPS.mkdir(parents=True, exist_ok=True)
-    generated_db = None
-    generated_zip = None
-    try:
-        if using_postgres():
-            generated_zip = create_backup("automatico")
-            if not generated_zip.exists() or generated_zip.stat().st_size == 0:
-                raise RuntimeError("La copia automática cloud quedó vacía")
-            os.replace(generated_zip, BACKUPS / AUTOMATIC_BACKUP_ZIP)
-            for stale in BACKUPS.glob("negrosky_*_automatico.zip"):
-                if stale.name != AUTOMATIC_BACKUP_ZIP:
-                    stale.unlink(missing_ok=True)
-            return BACKUPS / AUTOMATIC_BACKUP_ZIP
-        generated_db = create_backup("automatico")
-        generated_zip = generated_db.with_suffix(".zip")
-        if not generated_db.exists() or generated_db.stat().st_size == 0:
-            raise RuntimeError("La copia automática de la base de datos quedó vacía")
-        if not generated_zip.exists() or generated_zip.stat().st_size == 0:
-            raise RuntimeError("La copia automática completa quedó vacía")
-        _validate_database_file(generated_db)
-        # os.replace es atómico dentro de la misma carpeta: si el proceso se
-        # interrumpe antes, la copia anterior permanece intacta.
-        os.replace(generated_db, BACKUPS / AUTOMATIC_BACKUP_DB)
-        os.replace(generated_zip, BACKUPS / AUTOMATIC_BACKUP_ZIP)
-        # Limpia únicamente restos automáticos antiguos de esta misma carpeta;
-        # nunca toca respaldos manuales ni copias previas a una restauración.
-        for stale in BACKUPS.glob("negrosky_*_automatico.db"):
-            if stale.name != AUTOMATIC_BACKUP_DB:
-                stale.unlink(missing_ok=True)
-        for stale in BACKUPS.glob("negrosky_*_automatico.zip"):
-            if stale.name != AUTOMATIC_BACKUP_ZIP:
-                stale.unlink(missing_ok=True)
-        return BACKUPS / AUTOMATIC_BACKUP_DB
-    finally:
-        for path in (generated_db, generated_zip):
-            if path and path.exists():
-                path.unlink(missing_ok=True)
-
-
-def cleanup_old_notifications():
-    """Elimina solo notificaciones leídas que superen la retención configurada."""
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) -
-              timedelta(days=NOTIFICATION_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-    with connection() as con:
-        result = con.execute(
-            "DELETE FROM notifications WHERE read_at IS NOT NULL AND read_at < ?",
-            (cutoff,),
-        )
-    return result.rowcount
-
-
-def run_daily_maintenance():
-    """Mantenimiento seguro: respaldo automático y limpieza de avisos antiguos."""
-    try:
-        cleanup_old_notifications()
-        create_automatic_backup()
-    except Exception as exc:
-        # El mantenimiento nunca debe impedir que el servidor arranque.
-        print(f"[NEGROSKY] Mantenimiento automático no completado: {exc}")
-
-
-async def daily_maintenance_loop():
-    while True:
-        await asyncio.to_thread(run_daily_maintenance)
-        await asyncio.sleep(24 * 60 * 60)
 
 
 def _backup_kind(path: Path) -> str:
@@ -296,63 +172,6 @@ def _validate_database_file(path: Path):
             raise HTTPException(status_code=409, detail="El respaldo está dañado")
     finally:
         check.close()
-
-
-def _restore_postgres_payload(payload):
-    if not using_postgres():
-        raise HTTPException(status_code=409, detail="Este respaldo PostgreSQL solo puede restaurarse en modo cloud")
-    tables = payload.get("tables") if isinstance(payload, dict) else None
-    if not isinstance(tables, dict) or not tables:
-        raise HTTPException(status_code=409, detail="El respaldo PostgreSQL no contiene tablas")
-    allowed = set(tables)
-    with connection() as con:
-        relations = con.execute(
-            "SELECT tc.table_name, ccu.table_name AS parent_table "
-            "FROM information_schema.table_constraints tc "
-            "JOIN information_schema.constraint_column_usage ccu "
-            "ON ccu.constraint_name=tc.constraint_name AND ccu.table_schema=tc.table_schema "
-            "WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema='public'"
-        ).fetchall()
-        dependencies = {table: set() for table in allowed}
-        for relation in relations:
-            if relation[0] in allowed and relation[1] in allowed and relation[0] != relation[1]:
-                dependencies[relation[0]].add(relation[1])
-        order = []
-        remaining = set(allowed)
-        while remaining:
-            ready = sorted(table for table in remaining if not (dependencies[table] & remaining))
-            if not ready:
-                ready = sorted(remaining)
-            order.extend(ready)
-            remaining.difference_update(ready)
-
-        quoted = [f'"{table}"' for table in sorted(allowed)]
-        con.execute("TRUNCATE TABLE " + ",".join(quoted) + " RESTART IDENTITY CASCADE")
-        for table in order:
-            records = tables.get(table) or []
-            if not records:
-                continue
-            columns = list(records[0].keys())
-            column_sql = ",".join(f'"{column}"' for column in columns)
-            placeholders = ",".join(["%s"] * len(columns))
-            values = [tuple(record.get(column) for column in columns) for record in records]
-            con.executemany(
-                f'INSERT INTO "{table}" ({column_sql}) VALUES ({placeholders})',
-                values,
-            )
-        # Los datos restaurados usan sus IDs originales; dejamos cada secuencia
-        # preparada para que el próximo registro continúe desde el máximo.
-        for table in order:
-            sequence = con.execute(
-                "SELECT pg_get_serial_sequence(%s, 'id')", (f"public.{table}",)
-            ).fetchone()[0]
-            if sequence:
-                con.execute(
-                    "SELECT setval(%s::regclass, COALESCE((SELECT MAX(id) FROM "
-                    f'"{table}"), 1), (SELECT COUNT(*) > 0 FROM "{table}"))',
-                    (sequence,),
-                )
-    return {"database": "database/postgres_data.json"}
 
 
 def _restore_backup_path(source: Path):
@@ -381,26 +200,17 @@ def _restore_backup_path(source: Path):
             backup_format = str(manifest.get("format", ""))
             if not backup_format.startswith("negrosky-loyalty-full-backup"):
                 raise HTTPException(status_code=409, detail="Formato de respaldo no compatible")
-            if backup_format.endswith("postgres-v1"):
-                database_name = "database/postgres_data.json"
-                try:
-                    payload = json.loads(bundle.read(database_name).decode("utf-8"))
-                except (KeyError, UnicodeDecodeError, json.JSONDecodeError):
-                    raise HTTPException(status_code=409, detail="El ZIP cloud no contiene datos válidos")
-                restored = _restore_postgres_payload(payload)
-            else:
-                database_name = _zip_database_path(bundle)
-                if not database_name:
-                    raise HTTPException(status_code=409, detail="El ZIP no contiene una base de datos")
-                database_bytes = bundle.read(database_name)
-                extracted = BACKUPS / ("restore_database_" + source.stem + ".db")
-                extracted.write_bytes(database_bytes)
-                try:
-                    _validate_database_file(extracted)
-                    shutil.copy2(extracted, database_path())
-                finally:
-                    extracted.unlink(missing_ok=True)
-                restored = {"database": database_name}
+            database_name = _zip_database_path(bundle)
+            if not database_name:
+                raise HTTPException(status_code=409, detail="El ZIP no contiene una base de datos")
+            database_bytes = bundle.read(database_name)
+            extracted = BACKUPS / ("restore_database_" + source.stem + ".db")
+            extracted.write_bytes(database_bytes)
+            try:
+                _validate_database_file(extracted)
+                shutil.copy2(extracted, database_path())
+            finally:
+                extracted.unlink(missing_ok=True)
             # Los archivos externos se restauran únicamente dentro de las
             # carpetas permitidas y con validación contra traversal.
             restored_files = 0
@@ -416,7 +226,7 @@ def _restore_backup_path(source: Path):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(bundle.read(name))
                 restored_files += 1
-            return {"restored_files": restored_files, **restored}
+            return {"restored_files": restored_files, "database": database_name}
     except zipfile.BadZipFile:
         raise HTTPException(status_code=409, detail="El archivo ZIP está dañado")
 
@@ -447,25 +257,9 @@ def bootstrap_admin():
 
 @app.on_event("startup")
 def startup():
-    global _maintenance_task
     init_db()
     sync_module_defaults()
     bootstrap_admin()
-    # Se ejecuta una vez al iniciar y luego cada 24 horas. Si el proceso se
-    # reinicia, vuelve a comprobar la copia del día sin crear otra histórica.
-    _maintenance_task = asyncio.create_task(daily_maintenance_loop())
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    global _maintenance_task
-    if _maintenance_task:
-        _maintenance_task.cancel()
-        try:
-            await _maintenance_task
-        except asyncio.CancelledError:
-            pass
-        _maintenance_task = None
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict:
@@ -484,10 +278,7 @@ def current_user(authorization: str | None = Header(default=None)) -> dict:
             "SELECT * FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL",
             (payload["sid"], payload["sub"]),
         ).fetchone()
-        # Algunas conexiones PostgreSQL pueden no devolver inmediatamente la sesión
-        # recién creada. El token firmado sigue validando identidad y expiración;
-        # si la fila existe, se valida además su revocación.
-        if session and datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
+        if not session or datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
             raise HTTPException(status_code=401, detail="Sesión cerrada o vencida")
         user = con.execute(
             """SELECT id, tenant_id, branch_id, name, username, email, email_optional,
@@ -657,11 +448,7 @@ def sync_module_defaults():
         tenant_ids = [row[0] for row in con.execute("SELECT id FROM tenants").fetchall()]
         for tenant_id in tenant_ids:
             initialize_tenant_modules(con, tenant_id)
-            con.execute(
-                "INSERT INTO tenant_onboarding (tenant_id,setup_mode) VALUES (?,?) "
-                "ON CONFLICT(tenant_id) DO NOTHING",
-                (tenant_id, "owner"),
-            )
+            con.execute("INSERT OR REPLACE INTO tenant_onboarding (tenant_id,setup_mode) VALUES (?,?)", (tenant_id, data.setup_mode))
 
 
 def effective_modules(con, tenant_id: int, branch_id: int | None = None):
@@ -1398,7 +1185,7 @@ def create_tenant(data: TenantInput, user=Depends(require("super_admin"))):
             audit(con, user, "create", "tenant", tenant_id, data.model_dump())
             tenant = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
         return row_dict(tenant)
-    except INTEGRITY_ERRORS:
+    except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail=f"La URL /b/{slug} ya pertenece a otro negocio. Escribe una diferente.")
 
 @app.put("/api/tenants/{tenant_id}")
@@ -1415,7 +1202,7 @@ def update_tenant(tenant_id: int, data: TenantUpdate, user=Depends(require("supe
             audit(con, user, "update", "tenant", tenant_id, data.model_dump())
             updated = con.execute("SELECT * FROM tenants WHERE id=?", (tenant_id,)).fetchone()
         return row_dict(updated)
-    except INTEGRITY_ERRORS:
+    except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="La URL corta ya pertenece a otro negocio")
 
 
@@ -1788,7 +1575,7 @@ def create_branch(data: BranchInput, user=Depends(require("super_admin", "busine
             audit(con, user, "create", "branch", branch_id, data.model_dump())
             branch = con.execute("SELECT * FROM branches WHERE id=?", (branch_id,)).fetchone()
         return row_dict(branch)
-    except INTEGRITY_ERRORS:
+    except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="La sucursal ya existe")
 
 
@@ -2096,7 +1883,7 @@ def create_user(data: UserInput, user=Depends(require("super_admin", "business_a
                 "SELECT id, tenant_id, branch_id, name, username, CASE WHEN email_optional=1 THEN NULL ELSE email END AS email, role, status, force_password_change, created_at FROM users WHERE id=?", (user_id,)
             ).fetchone()
         return row_dict(created)
-    except INTEGRITY_ERRORS:
+    except sqlite3.IntegrityError:
         raise HTTPException(status_code=409, detail="El nombre de usuario o correo ya está registrado")
 
 
@@ -2121,7 +1908,7 @@ def update_user(user_id: int, data: UserUpdate, actor=Depends(require("super_adm
         try:
             con.execute("""UPDATE users SET tenant_id=?,branch_id=?,name=?,username=?,email=?,email_optional=?,role=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""",
                         (scope, data.branch_id, data.name.strip(), username, email, int(optional), data.role, user_id))
-        except INTEGRITY_ERRORS:
+        except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="El usuario o correo ya pertenece a otra cuenta")
         audit(con, actor, "update", "user", user_id, {"username": username, "role": data.role})
     return {"status": "updated", "id": user_id}
@@ -2334,7 +2121,7 @@ def merge_customers(data: MergeCustomersInput,
         for reward in con.execute("SELECT * FROM rewards WHERE customer_id=? ORDER BY id", (data.duplicate_id,)).fetchall():
             try:
                 con.execute("UPDATE rewards SET customer_id=? WHERE id=?", (data.primary_id, reward["id"]))
-            except INTEGRITY_ERRORS:
+            except sqlite3.IntegrityError:
                 next_cycle = con.execute("SELECT COALESCE(MAX(card_cycle),0)+1 FROM rewards WHERE customer_id=? AND program_id=?", (data.primary_id, reward["program_id"])).fetchone()[0]
                 con.execute("UPDATE rewards SET customer_id=?,card_cycle=? WHERE id=?", (data.primary_id, next_cycle, reward["id"]))
         combined_notes = "\n".join(x for x in [primary["notes"], duplicate["notes"]] if x)
@@ -3167,7 +2954,7 @@ def create_appointment_service(data: AppointmentServiceInput,
                 (tenant_id,branch_id,name,duration_minutes,price) VALUES (?,?,?,?,?)""",
                 (scope, data.branch_id, data.name.strip(), data.duration_minutes, data.price),
             )
-        except INTEGRITY_ERRORS:
+        except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Ya existe un servicio con ese nombre")
         audit(con, user, "create", "appointment_service", cur.lastrowid, data.model_dump())
         created = con.execute("SELECT * FROM appointment_services WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -4040,7 +3827,6 @@ def list_backups(user=Depends(require("super_admin"))):
     BACKUPS.mkdir(parents=True, exist_ok=True)
     return [{"filename": path.name, "size": path.stat().st_size,
              "kind": _backup_kind(path),
-             "automatic": path.name in {AUTOMATIC_BACKUP_DB, AUTOMATIC_BACKUP_ZIP},
              "modified_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()}
             for path in sorted([*BACKUPS.glob("negrosky_*.db"), *BACKUPS.glob("negrosky_*.zip")], key=lambda item: item.stat().st_mtime, reverse=True)]
 
@@ -4238,7 +4024,7 @@ def reserve_raffle_ticket(raffle_id:int,data:RaffleTicketInput,user=Depends(requ
         if not r or not (user["role"]=="super_admin" or r["tenant_id"]==user.get("tenant_id")): raise HTTPException(404,"Rifa no encontrada")
         require_user_module(con, user, "raffles")
         try: cur=con.execute("INSERT INTO raffle_tickets(raffle_id,ticket_number,customer_name,customer_phone) VALUES(?,?,?,?)",(raffle_id,data.ticket_number,data.customer_name,data.customer_phone))
-        except INTEGRITY_ERRORS: raise HTTPException(409,"La boleta ya está reservada")
+        except sqlite3.IntegrityError: raise HTTPException(409,"La boleta ya está reservada")
         return row_dict(con.execute("SELECT * FROM raffle_tickets WHERE id=?",(cur.lastrowid,)).fetchone())
 
 @app.post("/api/raffles/tickets/{ticket_id}/validate")
