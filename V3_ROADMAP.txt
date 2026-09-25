@@ -1,0 +1,24 @@
+NEGROSKY LOYALTY V3 · ROADMAP DESPUÉS DE BUILD 023
+
+BASE CONSOLIDADA HASTA BUILD 023
+1. Agenda de citas activable por negocio o sucursal y calendario para dueño.
+2. Servicios con duración, precio y sucursal.
+3. Días y horas disponibles para cliente, cancelación con motivo y administración de estados.
+4. Demora estimada por trabajador o dueño, duración por servicio y horas visibles en formato de 12 horas.
+5. Notificaciones internas de compras, premios y citas con barra inferior temporal.
+6. QR y enlace de red local que abre el panel móvil con el código; URL por negocio.
+7. Orden alfabético e aislamiento probado entre negocios y clientes.
+
+SIGUIENTE BLOQUE RECOMENDADO
+1. Catálogo de imágenes, iconos y plantillas por tipo de negocio.
+2. Venta y control de tiempo.
+3. Notificaciones externas por WhatsApp, correo o push.
+4. Ocho negocios demo completos.
+5. Internacionalización: idiomas, países, moneda y zona horaria.
+6. Aplicaciones instalables y publicación con HTTPS.
+
+REGLA PERMANENTE
+El administrador general crea negocios. El dueño solo administra su negocio y
+crea sucursales. El trabajador no crea negocios ni sucursales. Ningún dato de
+clientes, usuarios, citas, campañas o movimientos puede mezclarse entre negocios.
+Todo módulo debe poder activarse por negocio y, cuando aplique, por sucursal.

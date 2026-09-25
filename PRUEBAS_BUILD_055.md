@@ -1,0 +1,31 @@
+# PRUEBAS BUILD 055
+
+- [x] Compilación de backend y esquemas.
+- [x] Catálogo privado accesible solo para super_admin.
+- [x] Actualización de módulos por negocio.
+- [x] El dueño no puede modificar feature_modules.
+- [x] Los módulos desactivados no se devuelven en enabled_modules.
+- [x] Rifas y ruleta bloqueadas en backend cuando se desactivan.
+- [x] Citas, venta por tiempo y notificaciones bloqueadas en backend cuando se desactivan.
+- [x] Página pública, QR y recursos públicos cerrados al desactivar Página pública.
+- [x] Arranque mediante `core.backend.api.main:app` y archivos estáticos comprobados.
+- [x] Prueba real de guardar, cambiar y recargar módulos desde el formulario del Administrador General.
+- [x] Prueba de interfaz con módulos apagados: dueño, trabajador y cliente ocultan Fidelización, Citas, Venta por tiempo, Notificaciones, Rifas y Ruleta.
+- [x] Prueba de separación: Ruleta activa con Fidelización apagada; cada vista queda independiente y no hay Ruleta dentro de Fidelización.
+- [x] Prueba de persistencia en API: estado completo por negocio, bloqueo de escrituras y cierre de la página pública.
+- [x] Corregido el error JavaScript de un botón antiguo inexistente que impedía ejecutar la visibilidad de módulos.
+- [x] Corregida la carrera que podía sobrescribir el primer guardado mientras se cargaba el panel.
+- [x] Caché de scripts actualizado a versión 62 para evitar cargar el JavaScript anterior.
+- [x] Prueba en vivo con la página del cliente ya abierta: al apagar Página pública se reemplaza la pantalla por “Página no disponible”.
+- [x] Prueba en vivo del trabajador: al apagar Fidelización, Citas o Venta por tiempo, sus controles desaparecen sin cerrar la página.
+- [x] Prueba de selección cruzada PIZZAS/Santuario: el negocio elegido en el panel y el menú mostrado usan el mismo tenant.
+- [x] Prueba de regresión de Agenda: una carga tardía no la vuelve a mostrar cuando el módulo ya está apagado.
+- [x] Ruleta independiente también en la página del cliente; ya no se inserta dentro del contenedor de Fidelización.
+- [x] Caché actualizado a v63 para administrador, v44 para cliente y v57 para trabajador.
+- [x] El HTML inicial identifica administración y trabajador como BUILD 055.
+- [x] El Control y el iniciador distinguen BUILD 055 de una versión antigua mediante `/api/health`; solo reemplazan procesos NEGROSKY identificados.
+- [x] La regla CSS de Ruleta respeta `.hidden`; con `roulette=false` el contenedor no se muestra aunque el módulo se haya creado en el DOM.
+- [x] Prueba de aislamiento de vistas: se recorrieron Horarios, Diseño visual, Fidelización, Resumen, Módulos y Clientes; en cada caso quedó visible exactamente una vista.
+- [x] Prueba real de Ruleta: pausar, consultar persistencia, reactivar y verificar que el endpoint administrativo conserva el estado.
+- [ ] Prueba visual final en Windows con navegador del usuario.
+- [ ] Prueba final desde un celular conectado a la red del servidor.

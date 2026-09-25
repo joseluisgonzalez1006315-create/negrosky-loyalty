@@ -1,0 +1,26 @@
+NEGROSKY LOYALTY V3 · BUILD 023
+
+PANEL ADMINISTRATIVO
+URL PC: http://127.0.0.1:8030
+Usuario: admin
+Correo alternativo: admin@negrosky.local
+Contraseña: ChangeMe123!
+
+PANEL DEL TRABAJADOR
+URL PC: http://127.0.0.1:8030/worker
+Correo demo heredado: trabajador@santuario.demo
+Contraseña demo heredada: Demo12345!
+
+PÁGINA DEL CLIENTE DEMO
+URL PC: http://127.0.0.1:8030/b/santuario
+
+Las URL exactas para celular aparecen dentro del panel y del Control Center.
+El PC y el celular deben estar conectados a la misma red Wi-Fi.
+
+INICIO RECOMENDADO
+1. Ejecute INSTALAR_WINDOWS.bat únicamente la primera vez.
+2. Después abra ABRIR_NEGROSKY_CONTROL.vbs.
+3. Pulse Iniciar.
+
+Esta versión es exclusivamente para pruebas locales. Cambie las contraseñas
+antes de publicar la plataforma en un servidor.
