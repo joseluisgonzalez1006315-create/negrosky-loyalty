@@ -2426,7 +2426,7 @@ def list_programs(tenant_id: int | None = None, user=Depends(current_user)):
             """SELECT p.*, EXISTS(SELECT 1 FROM program_icons pi WHERE pi.program_id=p.id) AS has_custom_icon,
             COUNT(r.id) AS rewards_issued,
             CASE WHEN p.reward_stock IS NULL THEN NULL
-                 ELSE MAX(p.reward_stock - COUNT(r.id), 0) END AS rewards_remaining
+                 ELSE GREATEST(p.reward_stock - COUNT(r.id), 0) END AS rewards_remaining
             FROM loyalty_programs p LEFT JOIN rewards r ON r.program_id=p.id
             WHERE p.tenant_id=? AND p.status!='trashed' GROUP BY p.id ORDER BY p.id DESC""",
             (scope,),
@@ -2447,7 +2447,7 @@ def list_program_trash(tenant_id: int | None = None, user=Depends(require("super
             """SELECT p.*, EXISTS(SELECT 1 FROM program_icons pi WHERE pi.program_id=p.id) AS has_custom_icon,
             COUNT(r.id) AS rewards_issued,
             CASE WHEN p.reward_stock IS NULL THEN NULL
-                 ELSE MAX(p.reward_stock - COUNT(r.id), 0) END AS rewards_remaining
+                 ELSE GREATEST(p.reward_stock - COUNT(r.id), 0) END AS rewards_remaining
             FROM loyalty_programs p LEFT JOIN rewards r ON r.program_id=p.id
             WHERE p.tenant_id=? AND p.status='trashed'
             GROUP BY p.id ORDER BY p.deleted_at DESC, p.id DESC""",
@@ -2703,7 +2703,7 @@ def customer_cards(customer=Depends(current_customer)):
             p.target_purchases, p.reward_name, p.progress_emoji, p.reward_stock, p.reward_display,
             p.title_mode,p.stamps_mode,p.progress_mode,p.reward_mode,p.button_mode,
             EXISTS(SELECT 1 FROM program_icons pi WHERE pi.program_id=p.id) AS has_custom_icon,
-            CASE WHEN p.reward_stock IS NULL THEN NULL ELSE MAX(p.reward_stock -
+            CASE WHEN p.reward_stock IS NULL THEN NULL ELSE GREATEST(p.reward_stock -
             (SELECT COUNT(*) FROM rewards r WHERE r.program_id=p.id), 0) END AS rewards_remaining
             FROM loyalty_cards c JOIN loyalty_programs p ON p.id=c.program_id
             WHERE c.customer_id=? AND p.status='active' ORDER BY p.id""",
