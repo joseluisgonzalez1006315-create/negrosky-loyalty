@@ -1,0 +1,36 @@
+PARCHE DE GUARDADO DEL DISEÑO VISUAL — NEGROSKY LOYALTY
+
+APLICAR SOBRE TU CARPETA ACTUAL (incluida BUILD 067 si ya la instalaste).
+Este ZIP es un parche, NO el proyecto completo.
+
+1. Haz una copia de tu archivo actual app/database.py.
+2. Extrae este ZIP en una carpeta temporal.
+3. Copia app/database.py de este parche dentro de la carpeta app de tu
+   proyecto actual, reemplazando únicamente ese archivo.
+4. Abre tu publicador rápido y selecciona la carpeta COMPLETA del proyecto
+   actual, no la carpeta de este parche. Publica y espera el despliegue.
+5. En Diseño visual, cambia un color y guarda. Recarga la página y comprueba
+   que sigue guardado. Prueba también logo/fondo y la página pública.
+
+CAUSA CORREGIDA
+La capa PostgreSQL consulta SELECT lastval() después de cada INSERT.
+Al insertar un diseño con tenant_id explícito no se genera ninguna secuencia.
+En una conexión sin secuencia previa, lastval() produce un error que invalida
+la transacción. Capturar la excepción en Python no repara esa transacción.
+El parche aísla esa consulta opcional con un SAVEPOINT y revierte únicamente
+la consulta fallida, conservando el INSERT y la transacción principal.
+
+ALCANCE Y PRUEBAS
+- Un único archivo de producción modificado: app/database.py.
+- No contiene bases de datos, credenciales ni cambios en otras funciones.
+- Regresión mediante un modelo de transacciones PostgreSQL: fallaba antes,
+  pasa después. No equivale a una prueba en un servidor PostgreSQL real.
+- Prueba de integración SQLite: primer guardado, modificación posterior,
+  lectura pública y aislamiento entre dos negocios.
+- Identificadores automáticos existentes: prueba correcta.
+- Resultado: 3 pruebas correctas. Se incluyen en tests/.
+
+No se ha accedido a tu Render ni a tu base publicada. Este fallo está comprobado
+en el código aportado, pero aún debes confirmar el resultado en tu instalación.
+Si persiste: enviar el texto exacto del error de guardado y el log de ese momento;
+no enviar contraseñas, tokens ni DATABASE_URL.
