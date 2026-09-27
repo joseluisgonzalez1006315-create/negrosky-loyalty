@@ -42,14 +42,20 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.56.1")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
-async def no_browser_cache(request, call_next):
+async def response_cache_policy(request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    # API responses and HTML must remain fresh because they contain session and
+    # business data. Static assets are versioned with query strings in the
+    # templates, so they can be cached safely and avoid repeated downloads.
+    if request.url.path.startswith("/static/") and request.url.path.rsplit("/", 1)[-1].split(".")[-1] in {"js", "css", "svg", "webmanifest", "wav", "png", "jpg", "jpeg", "webp"}:
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -774,6 +780,10 @@ def require_service_open(con, tenant_id, branch_id=None):
 
 
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
+    # Ruleta quedó fuera del producto actual. Mantener esta regla en el backend
+    # evita que una configuración antigua la reactive desde una interfaz vieja.
+    if module_key == "roulette":
+        return False
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
         "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=?",
@@ -1044,7 +1054,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.56.1", "build": "056.1", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
