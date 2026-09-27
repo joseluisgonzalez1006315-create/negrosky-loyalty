@@ -249,7 +249,8 @@ class ResetPlatformInput(BaseModel):
 
 
 class CustomerIdentifyInput(BaseModel):
-    name: str = Field(min_length=2, max_length=120)
+    # El celular identifica al cliente; el nombre puede omitirse.
+    name: str | None = Field(default=None, max_length=120)
     phone: str = Field(pattern=r"^[0-9]{10}$")
     marketing_consent: bool = False
     branch_id: int | None = None

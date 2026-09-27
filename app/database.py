@@ -88,8 +88,11 @@ class _PostgresConnection:
             statement,
             flags=re.I,
         )
-        statement = re.sub(r"\b([a-zA-Z_][a-zA-Z0-9_]*) IS %s", r"\1 IS NOT DISTINCT FROM %s", statement)
         statement = statement.replace("?", "%s")
+        # Do this after placeholder conversion. Queries written as
+        # `branch_id IS ?` otherwise reach PostgreSQL as the invalid
+        # `branch_id IS %s`, which breaks loading and saving schedules.
+        statement = re.sub(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\s+IS\s+%s", r"\1 IS NOT DISTINCT FROM %s", statement, flags=re.I)
         # SQLite permite INSERT OR IGNORE; PostgreSQL expresa lo mismo así.
         if re.match(r"\s*INSERT\s+OR\s+IGNORE\s+INTO\b", statement, re.I):
             statement = re.sub(r"(\s*INSERT)\s+OR\s+IGNORE(\s+INTO\b)", r"\1\2", statement, count=1, flags=re.I)

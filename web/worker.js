@@ -71,16 +71,58 @@ async function scanQrFromIphone(){
   };
   input.click();
 }
-$('scan-button').onclick=async()=>{armWorkerSound();try{
-  if(!window.isSecureContext)throw Error('Abre la plataforma con la dirección HTTPS.');
-  if(!navigator.mediaDevices?.getUserMedia)throw Error('IPHONE_FALLBACK');
-  const v=$('camera');v.classList.remove('hidden');v.setAttribute('playsinline','');v.setAttribute('autoplay','');v.muted=true;
-  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},audio:false}});
-  v.srcObject=stream;await v.play();const stop=()=>{stream.getTracks().forEach(t=>t.stop());v.srcObject=null;v.classList.add('hidden')};
-  if('BarcodeDetector'in window){const d=new BarcodeDetector({formats:['qr_code']});const loop=async()=>{if(v.classList.contains('hidden'))return;try{const codes=await d.detect(v);if(codes.length){$('operation-code').value=cleanCode(codes[0].rawValue);stop();await loadPreview();return}}catch(e){}requestAnimationFrame(loop)};loop()}
-  else if(window.jsQR){const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});const loop=()=>{if(v.classList.contains('hidden'))return;canvas.width=v.videoWidth;canvas.height=v.videoHeight;if(canvas.width){ctx.drawImage(v,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});if(code?.data){$('operation-code').value=cleanCode(code.data);stop();loadPreview();return}}requestAnimationFrame(loop)};loop()}
-  else throw Error('IPHONE_FALLBACK');
-}catch(e){if(e.message==='IPHONE_FALLBACK'||e.name==='NotAllowedError'||e.name==='NotFoundError'||e.name==='SecurityError'){scanQrFromIphone()}else{$('worker-result').className='status-panel error';$('worker-result').textContent=e.message||'No fue posible abrir la cámara.'}}};if(queryCode)$('pending-login-note').classList.remove('hidden');
+let activeCameraStream=null;
+let cameraFrameId=0;
+function stopCamera(){
+  if(cameraFrameId){cancelAnimationFrame(cameraFrameId);cameraFrameId=0}
+  if(activeCameraStream){activeCameraStream.getTracks().forEach(track=>track.stop());activeCameraStream=null}
+  const video=$('camera');
+  if(video){video.pause();video.srcObject=null}
+  $('camera-shell')?.classList.add('hidden');
+}
+function cameraFound(code){
+  $('operation-code').value=cleanCode(code);
+  stopCamera();
+  loadPreview();
+}
+$('camera-close').onclick=stopCamera;
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera()});
+$('scan-button').onclick=async()=>{
+  armWorkerSound();
+  if(!window.isSecureContext){$('worker-result').className='status-panel error';$('worker-result').textContent='La cámara solo funciona con la dirección HTTPS.';return}
+  if(!navigator.mediaDevices?.getUserMedia||!window.isSecureContext){scanQrFromIphone();return}
+  const shell=$('camera-shell'),video=$('camera'),status=$('camera-status');
+  stopCamera(); shell.classList.remove('hidden'); status.textContent='Solicitando permiso para la cámara…';
+  try{
+    activeCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},resizeMode:'none'},audio:false});
+    video.srcObject=activeCameraStream; video.setAttribute('playsinline',''); video.setAttribute('webkit-playsinline',''); video.muted=true;
+    await video.play(); status.textContent='Buscando código…';
+    const scan=async()=>{
+      if(!activeCameraStream||shell.classList.contains('hidden'))return;
+      try{
+        if('BarcodeDetector' in window){
+          if(!scan.detector){scan.detector=new BarcodeDetector({formats:['qr_code']})}
+          const codes=await scan.detector.detect(video);
+          if(codes.length){cameraFound(codes[0].rawValue);return}
+        }else if(window.jsQR&&video.videoWidth){
+          if(!scan.canvas)scan.canvas=document.createElement('canvas');
+          if(!scan.ctx)scan.ctx=scan.canvas.getContext('2d',{willReadFrequently:true});
+          const scale=Math.min(1,1280/video.videoWidth);scan.canvas.width=Math.max(1,Math.round(video.videoWidth*scale));scan.canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
+          scan.ctx.drawImage(video,0,0,scan.canvas.width,scan.canvas.height);
+          const image=scan.ctx.getImageData(0,0,scan.canvas.width,scan.canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});
+          if(code?.data){cameraFound(code.data);return}
+        }
+      }catch(e){}
+      cameraFrameId=requestAnimationFrame(scan);
+    };
+    scan();
+  }catch(e){
+    stopCamera();
+    if(['NotAllowedError','NotFoundError','SecurityError','OverconstrainedError'].includes(e.name))scanQrFromIphone();
+    else{$('worker-result').className='status-panel error';$('worker-result').textContent=e.message||'No fue posible abrir la cámara.'}
+  }
+};
+if(queryCode)$('pending-login-note').classList.remove('hidden');
 $('worker-customer-form').onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/customers/assisted',{method:'POST',body:JSON.stringify({phone:$('worker-customer-phone').value,name:$('worker-customer-name').value||null})});$('worker-customer-message').textContent=r.message;showToast(r.message,'success');e.target.reset()}catch(x){$('worker-customer-message').textContent=x.message;showToast(x.message,'error')}};
 if(token)home().catch(e=>{localStorage.removeItem('worker_token');token=null;const note=$('pending-login-note');note.textContent=e.message;note.classList.remove('hidden');showToast(e.message,'error')});
 

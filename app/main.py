@@ -645,10 +645,19 @@ DEFAULT_MODULES = {
 
 def initialize_tenant_modules(con, tenant_id: int):
     """Create explicit module flags for a new business without changing existing flags."""
-    con.executemany(
-        "INSERT OR IGNORE INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, NULL, ?, ?)",
-        [(tenant_id, key, int(DEFAULT_MODULES.get(key, False))) for key in MODULE_KEYS],
-    )
+    # PostgreSQL treats NULL values as distinct in a normal UNIQUE constraint,
+    # so ON CONFLICT/INSERT OR IGNORE would create duplicates for branch_id=NULL.
+    # Check the row explicitly and preserve any existing administrator choice.
+    for key in MODULE_KEYS:
+        exists = con.execute(
+            "SELECT 1 FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=? LIMIT 1",
+            (tenant_id, key),
+        ).fetchone()
+        if not exists:
+            con.execute(
+                "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, NULL, ?, ?)",
+                (tenant_id, key, int(DEFAULT_MODULES.get(key, False))),
+            )
 
 
 def sync_module_defaults():
@@ -2637,6 +2646,7 @@ def restore_program(program_id: int, user=Depends(require("super_admin", "busine
 @app.post("/api/public/{slug}/identify")
 def identify_customer(slug: str, data: CustomerIdentifyInput):
     phone = "".join(ch for ch in data.phone if ch.isdigit() or ch == "+")
+    customer_name = (data.name or "").strip() or "Cliente"
     with connection() as con:
         tenant = con.execute("SELECT * FROM tenants WHERE slug=? AND status='active'", (slug,)).fetchone()
         if not tenant:
@@ -2650,13 +2660,13 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
         if customer:
             con.execute(
                 "UPDATE customers SET name=?, search_key=?, marketing_consent=?, origin_branch_id=?, birth_date=COALESCE(?,birth_date), birthday_consent=COALESCE(?,birthday_consent) WHERE id=?",
-                (data.name.strip(), normalize_search(data.name), int(data.marketing_consent), data.branch_id if data.branch_id is not None else customer["origin_branch_id"], data.birth_date, None if data.birthday_consent is None else int(data.birthday_consent), customer["id"]),
+                (customer_name, normalize_search(customer_name), int(data.marketing_consent), data.branch_id if data.branch_id is not None else customer["origin_branch_id"], data.birth_date, None if data.birthday_consent is None else int(data.birthday_consent), customer["id"]),
             )
             customer = con.execute("SELECT * FROM customers WHERE id=?", (customer["id"],)).fetchone()
         else:
             cur = con.execute(
                 "INSERT INTO customers (tenant_id, name, search_key, phone, marketing_consent, origin_branch_id, birth_date, birthday_consent) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (tenant["id"], data.name.strip(), normalize_search(data.name), phone, int(data.marketing_consent), data.branch_id, data.birth_date, int(bool(data.birthday_consent))),
+                (tenant["id"], customer_name, normalize_search(customer_name), phone, int(data.marketing_consent), data.branch_id, data.birth_date, int(bool(data.birthday_consent))),
             )
             customer_id = cur.lastrowid
             con.execute(
@@ -4159,7 +4169,14 @@ def diagnostics(user=Depends(require("super_admin"))):
     db_path = database_path()
     BACKUPS.mkdir(parents=True, exist_ok=True)
     with connection() as con:
-        integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+        # PRAGMA integrity_check solo existe en SQLite. En PostgreSQL la
+        # conexión ya valida la base y hacemos una consulta liviana para
+        # comprobar que responde sin romper el dashboard.
+        if using_postgres():
+            con.execute("SELECT 1").fetchone()
+            integrity = "ok"
+        else:
+            integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
