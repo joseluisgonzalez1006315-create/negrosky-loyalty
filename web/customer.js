@@ -271,3 +271,27 @@ const showHomeBeforePlatformAds=showHome;showHome=async function(){const result=
 async function loadCustomerPlatformAds(){if(!token)return;try{const rows=await fetch(`/api/public/${encodeURIComponent(slug)}/platform-ads`,{cache:'no-store'}).then(r=>r.ok?r.json():[]);for(const item of rows){if(sessionStorage.getItem(`negrosky_platform_ad_${slug}_${item.id}`))continue;sessionStorage.setItem(`negrosky_platform_ad_${slug}_${item.id}`,'1');const seconds=Math.max(1,Math.min(60,Number(item.ad_seconds)||5));await new Promise(resolve=>{const overlay=document.createElement('div');overlay.className='collaboration-overlay platform-ad-overlay';overlay.innerHTML=`<article class="collaboration-ad platform-ad"><button type="button" class="collaboration-close" aria-label="Cerrar">×</button><p class="eyebrow">PUBLICIDAD NEGROSKY</p><h2>${ES.escape(item.title||'Promoción especial')}</h2>${item.image_url?`<img src="${ES.escape(item.image_url)}" alt="Publicidad">`:''}<p>${ES.escape(item.message||'')}</p><small>Esta publicidad se cerrará en ${seconds} segundos.</small></article>`;document.body.appendChild(overlay);let closed=false;const close=()=>{if(closed)return;closed=true;overlay.remove();resolve()};overlay.querySelector('.collaboration-close').onclick=close;setTimeout(close,seconds*1000)})}}catch(e){}}
 // Captura de cumpleaños en el primer registro del cliente.
 const birthdayIdentifyForm=$('identify-form');if(birthdayIdentifyForm)birthdayIdentifyForm.onsubmit=async e=>{e.preventDefault();const wantsWhatsApp=$('consent').checked,birthdayConsent=$('birthday-consent')?.checked||false,name=$('customer-name').value.trim(),phone=$('customer-phone').value.replace(/\D/g,''),birthDate=$('customer-birth-date')?.value||null;let whatsappWindow=null;if(wantsWhatsApp&&publicBranding?.whatsapp_number)whatsappWindow=window.open('about:blank','_blank');try{const r=await api(`/api/public/${slug}/identify`,{method:'POST',body:JSON.stringify({name,phone,marketing_consent:wantsWhatsApp,birth_date:birthDate,birthday_consent:birthdayConsent,branch_id:+($('customer-branch')?.value||0)||null})});token=r.access_token;localStorage.setItem(`customer_${slug}`,token);localStorage.setItem('negrosky_global_customer',JSON.stringify({name,phone}));document.documentElement.classList.add('customer-session');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.add('hidden');await loadPublicBranding();if(wantsWhatsApp&&!openWhatsAppOptIn(name,phone,whatsappWindow)&&whatsappWindow)whatsappWindow.close();await showHome()}catch(x){if(whatsappWindow)whatsappWindow.close();$('customer-error').textContent=x.message;showToast(x.message,'error')}};
+
+
+// BUILD 056.1: horarios con un único acceso y sin apertura automática.
+renderCustomerSchedule=function(b){
+  const home=$('customer-home'); if(!home)return;
+  let box=$('customer-schedule');
+  if(!box){
+    box=document.createElement('section'); box.id='customer-schedule'; box.className='schedule-panel hidden';
+    box.innerHTML='<div id="customer-schedule-content" class="schedule-content hidden"></div>';
+    home.insertBefore(box,$('customer-profile'));
+  }
+  const rows=b.business_hours||[], enabled=Boolean(b.show_business_hours&&rows.length);
+  box.classList.toggle('hidden',!enabled);
+  if(!enabled)return;
+  const content=$('customer-schedule-content');
+  const wasOpen=box.dataset.open==='1';
+  content.innerHTML='<h3>Horario de atención</h3>'+rows.map(row=>`<div class="customer-hour-row"><span>${publicDayNames[row.weekday]}</span><b>${row.enabled?formatBusinessHour(row.opens_at)+' – '+formatBusinessHour(row.closes_at):'Cerrado'}</b></div>`).join('');
+  content.classList.toggle('hidden',!wasOpen);
+};
+bindScheduleQuickButton=function(){
+  const button=document.querySelector('[data-scroll-target="customer-schedule"]'); if(!button)return;
+  button.onclick=()=>{const box=$('customer-schedule'),content=$('customer-schedule-content');if(!box||box.classList.contains('hidden')||!content)return;box.dataset.open='1';content.classList.remove('hidden');box.scrollIntoView({behavior:'smooth',block:'start'})};
+};
+bindScheduleQuickButton();
