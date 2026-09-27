@@ -665,12 +665,34 @@ def sync_module_defaults():
     with connection() as con:
         tenant_ids = [row[0] for row in con.execute("SELECT id FROM tenants").fetchall()]
         for tenant_id in tenant_ids:
-            initialize_tenant_modules(con, tenant_id)
-            con.execute(
-                "INSERT INTO tenant_onboarding (tenant_id,setup_mode) VALUES (?,?) "
-                "ON CONFLICT(tenant_id) DO NOTHING",
-                (tenant_id, "owner"),
-            )
+            # Keep one legacy row or an incomplete older schema from aborting
+            # the entire PostgreSQL startup transaction.  In particular,
+            # Supabase databases created before this table was migrated may
+            # not have a UNIQUE constraint that can be named in ON CONFLICT.
+            con.execute("SAVEPOINT negrosky_module_sync")
+            try:
+                initialize_tenant_modules(con, tenant_id)
+                onboarding = con.execute(
+                    "SELECT 1 FROM tenant_onboarding WHERE tenant_id=? LIMIT 1",
+                    (tenant_id,),
+                ).fetchone()
+                if not onboarding:
+                    con.execute(
+                        "INSERT INTO tenant_onboarding (tenant_id,setup_mode) VALUES (?,?)",
+                        (tenant_id, "owner"),
+                    )
+                con.execute("RELEASE SAVEPOINT negrosky_module_sync")
+            except Exception as exc:
+                # ROLLBACK TO clears PostgreSQL's failed-transaction state so
+                # the remaining businesses can still be processed. The
+                # warning identifies the tenant and original SQL error in the
+                # Render log without taking the service offline.
+                try:
+                    con.execute("ROLLBACK TO SAVEPOINT negrosky_module_sync")
+                    con.execute("RELEASE SAVEPOINT negrosky_module_sync")
+                except Exception:
+                    con.rollback()
+                print(f"[startup] No se pudieron sincronizar módulos del negocio {tenant_id}: {exc}")
 
 
 def effective_modules(con, tenant_id: int, branch_id: int | None = None):
