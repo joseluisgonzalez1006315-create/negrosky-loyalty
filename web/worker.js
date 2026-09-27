@@ -48,8 +48,39 @@ $('preview-button').onclick=loadPreview;
 $('operation-code').oninput=e=>{e.target.value=cleanCode(e.target.value)};
 $('operation-code').insertAdjacentHTML('afterend',`<div class="numeric-keypad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button type="button" data-digit="${n}">${n}</button>`).join('')}<button type="button" class="clear" data-clear>Limpiar</button><button type="button" data-digit="0">0</button><button type="button" class="clear" data-back>⌫</button></div>`);
 document.querySelector('.numeric-keypad').onclick=e=>{const button=e.target.closest('button');if(!button)return;armWorkerSound();if(button.dataset.clear!==undefined)$('operation-code').value='';else if(button.dataset.back!==undefined)$('operation-code').value=$('operation-code').value.slice(0,-1);else if($('operation-code').value.length<6)$('operation-code').value+=button.dataset.digit||''};
-$('scan-button').onclick=async()=>{armWorkerSound();if(!('BarcodeDetector'in window)){alert('Este navegador no permite escaneo automático. Usa la cámara normal del celular: el QR abrirá esta página directamente.');return}try{const v=$('camera');v.classList.remove('hidden');v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});await v.play();const d=new BarcodeDetector({formats:['qr_code']});const loop=async()=>{const codes=await d.detect(v);if(codes.length){$('operation-code').value=cleanCode(codes[0].rawValue);v.srcObject.getTracks().forEach(t=>t.stop());v.classList.add('hidden');await loadPreview()}else requestAnimationFrame(loop)};loop()}catch(e){$('worker-result').className='status-panel error';$('worker-result').textContent='No fue posible abrir la cámara. Revisa el permiso del navegador.'}};
-if(queryCode)$('pending-login-note').classList.remove('hidden');
+async function scanQrFromIphone(){
+  const result=$('worker-result');
+  const input=document.createElement('input');
+  input.type='file'; input.accept='image/*'; input.setAttribute('capture','environment'); input.style.display='none';
+  document.body.appendChild(input);
+  input.onchange=async()=>{
+    try{
+      const file=input.files?.[0]; if(!file)return;
+      const img=new Image(); img.onload=()=>{
+        const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+        const scale=Math.min(1,1600/Math.max(img.width,img.height)); canvas.width=Math.max(1,Math.round(img.width*scale)); canvas.height=Math.max(1,Math.round(img.height*scale));
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        const data=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const code=window.jsQR?.(data.data,data.width,data.height,{inversionAttempts:'attemptBoth'});
+        if(code?.data){$('operation-code').value=cleanCode(code.data);loadPreview();}
+        else{result.className='status-panel error';result.textContent='No se encontró un QR. Toma la foto enfocando solo el código.'}
+        URL.revokeObjectURL(img.src);
+      }; img.src=URL.createObjectURL(file);
+    }catch(e){result.className='status-panel error';result.textContent='No se pudo leer la imagen del QR.'}
+    finally{input.remove()}
+  };
+  input.click();
+}
+$('scan-button').onclick=async()=>{armWorkerSound();try{
+  if(!window.isSecureContext)throw Error('Abre la plataforma con la dirección HTTPS.');
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('IPHONE_FALLBACK');
+  const v=$('camera');v.classList.remove('hidden');v.setAttribute('playsinline','');v.setAttribute('autoplay','');v.muted=true;
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},audio:false}});
+  v.srcObject=stream;await v.play();const stop=()=>{stream.getTracks().forEach(t=>t.stop());v.srcObject=null;v.classList.add('hidden')};
+  if('BarcodeDetector'in window){const d=new BarcodeDetector({formats:['qr_code']});const loop=async()=>{if(v.classList.contains('hidden'))return;try{const codes=await d.detect(v);if(codes.length){$('operation-code').value=cleanCode(codes[0].rawValue);stop();await loadPreview();return}}catch(e){}requestAnimationFrame(loop)};loop()}
+  else if(window.jsQR){const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});const loop=()=>{if(v.classList.contains('hidden'))return;canvas.width=v.videoWidth;canvas.height=v.videoHeight;if(canvas.width){ctx.drawImage(v,0,0,canvas.width,canvas.height);const image=ctx.getImageData(0,0,canvas.width,canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});if(code?.data){$('operation-code').value=cleanCode(code.data);stop();loadPreview();return}}requestAnimationFrame(loop)};loop()}
+  else throw Error('IPHONE_FALLBACK');
+}catch(e){if(e.message==='IPHONE_FALLBACK'||e.name==='NotAllowedError'||e.name==='NotFoundError'||e.name==='SecurityError'){scanQrFromIphone()}else{$('worker-result').className='status-panel error';$('worker-result').textContent=e.message||'No fue posible abrir la cámara.'}}};if(queryCode)$('pending-login-note').classList.remove('hidden');
 $('worker-customer-form').onsubmit=async e=>{e.preventDefault();try{const r=await api('/api/customers/assisted',{method:'POST',body:JSON.stringify({phone:$('worker-customer-phone').value,name:$('worker-customer-name').value||null})});$('worker-customer-message').textContent=r.message;showToast(r.message,'success');e.target.reset()}catch(x){$('worker-customer-message').textContent=x.message;showToast(x.message,'error')}};
 if(token)home().catch(e=>{localStorage.removeItem('worker_token');token=null;const note=$('pending-login-note');note.textContent=e.message;note.classList.remove('hidden');showToast(e.message,'error')});
 
