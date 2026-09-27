@@ -706,11 +706,17 @@ DEFAULT_HOURS = [
 def _hours_open(rows, now_local):
     if not rows:
         return True
-    by_day = {row["weekday"]: row for row in rows}
+    # Older databases can contain weekday values as strings.  Normalize them
+    # here so the schedule works consistently with SQLite and PostgreSQL.
+    by_day = {int(row["weekday"]): row for row in rows if row["weekday"] is not None}
     today = by_day.get(now_local.weekday())
     current = now_local.strftime("%H:%M")
     if today and today["enabled"]:
-        opens, closes = today["opens_at"], today["closes_at"]
+        opens, closes = str(today["opens_at"])[:5], str(today["closes_at"])[:5]
+        # Opening and closing at the same time is the conventional way the
+        # schedule editor represents an all-day opening (00:00–00:00).
+        if opens == closes:
+            return True
         if opens <= closes and opens <= current <= closes:
             return True
         if closes < opens and current >= opens:
@@ -1560,6 +1566,33 @@ def branding_payload(con, tenant_id: int):
     }
 
 
+def _save_branding_fields(con, tenant_id: int, fields: dict):
+    """Save branding without relying on a Supabase UNIQUE constraint.
+
+    Older databases may have the right table but lack the unique index that
+    PostgreSQL requires for ``ON CONFLICT(tenant_id)``.  An explicit lookup is
+    compatible with both the old and current schemas and is safe here because
+    one request writes one tenant at a time.
+    """
+    existing = con.execute(
+        "SELECT 1 FROM business_branding WHERE tenant_id=? LIMIT 1", (tenant_id,)
+    ).fetchone()
+    clean = {key: value for key, value in fields.items() if key != "tenant_id"}
+    if existing:
+        assignments = ",".join(f"{key}=?" for key in clean)
+        con.execute(
+            f"UPDATE business_branding SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?",
+            (*clean.values(), tenant_id),
+        )
+    else:
+        columns = ",".join(("tenant_id", *clean.keys(), "updated_at"))
+        placeholders = ",".join("?" for _ in range(len(clean) + 1))
+        con.execute(
+            f"INSERT INTO business_branding ({columns}) VALUES ({placeholders},CURRENT_TIMESTAMP)",
+            (tenant_id, *clean.values()),
+        )
+
+
 @app.get("/api/branding")
 def get_branding(tenant_id: int | None = None,
                  user=Depends(require("super_admin", "business_admin", "branch_admin"))):
@@ -1580,76 +1613,36 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
         require_user_module(con, user, "public_page")
         if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        con.execute("""INSERT INTO business_branding
-            (tenant_id,theme_key,display_name,welcome_text,primary_color,secondary_color,button_color,
-             background_style,background_color,background_same_frame,background_fit_desktop,
-             background_x_desktop,background_y_desktop,background_fit_mobile,background_x_mobile,
-             background_y_mobile,background_image_opacity,background_overlay_opacity,
-             card_style,card_shape,card_opacity,logo_shape,logo_fit,logo_size,logo_opacity,
-             logo_background_color,font_family,
-             font_scale,text_color,button_shape,button_label,stamp_shape,stamp_done_color,
-             stamp_pending_color,progress_start_color,progress_end_color,progress_style,
-             show_profile,show_rewards,show_appointments,show_contact,show_business_hours,
-             show_campaign_title,show_campaign_stamps,show_campaign_progress,show_campaign_reward,show_campaign_button,
-             contact_phone,whatsapp_number,address,instagram_url,facebook_url,tiktok_url,website_url,maps_url,
-             social_display_mode,social_size,social_layout,social_position,show_social_mobile,show_social_desktop,
-             module_order_mobile,module_order_desktop,module_widths_mobile,module_widths_desktop,updated_at)
-            
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-            ON CONFLICT(tenant_id) DO UPDATE SET
-            theme_key=excluded.theme_key,display_name=excluded.display_name,welcome_text=excluded.welcome_text,
-            primary_color=excluded.primary_color,secondary_color=excluded.secondary_color,
-            button_color=excluded.button_color,background_style=excluded.background_style,
-            background_color=excluded.background_color,background_same_frame=excluded.background_same_frame,
-            background_fit_desktop=excluded.background_fit_desktop,
-            background_x_desktop=excluded.background_x_desktop,background_y_desktop=excluded.background_y_desktop,
-            background_fit_mobile=excluded.background_fit_mobile,
-            background_x_mobile=excluded.background_x_mobile,background_y_mobile=excluded.background_y_mobile,
-            background_image_opacity=excluded.background_image_opacity,
-            background_overlay_opacity=excluded.background_overlay_opacity,
-            card_style=excluded.card_style,
-            card_shape=excluded.card_shape,card_opacity=excluded.card_opacity,
-            logo_shape=excluded.logo_shape,logo_fit=excluded.logo_fit,logo_size=excluded.logo_size,
-            logo_opacity=excluded.logo_opacity,logo_background_color=excluded.logo_background_color,
-            font_family=excluded.font_family,font_scale=excluded.font_scale,text_color=excluded.text_color,
-            button_shape=excluded.button_shape,button_label=excluded.button_label,
-            stamp_shape=excluded.stamp_shape,stamp_done_color=excluded.stamp_done_color,
-            stamp_pending_color=excluded.stamp_pending_color,show_profile=excluded.show_profile,
-            progress_start_color=excluded.progress_start_color,progress_end_color=excluded.progress_end_color,
-            progress_style=excluded.progress_style,
-            show_rewards=excluded.show_rewards,show_appointments=excluded.show_appointments,
-            show_contact=excluded.show_contact,show_business_hours=excluded.show_business_hours,
-            show_campaign_title=excluded.show_campaign_title,show_campaign_stamps=excluded.show_campaign_stamps,
-            show_campaign_progress=excluded.show_campaign_progress,show_campaign_reward=excluded.show_campaign_reward,
-            show_campaign_button=excluded.show_campaign_button,
-            contact_phone=excluded.contact_phone,whatsapp_number=excluded.whatsapp_number,address=excluded.address,
-            instagram_url=excluded.instagram_url,facebook_url=excluded.facebook_url,tiktok_url=excluded.tiktok_url,
-            website_url=excluded.website_url,maps_url=excluded.maps_url,
-            social_display_mode=excluded.social_display_mode,social_size=excluded.social_size,
-            social_layout=excluded.social_layout,social_position=excluded.social_position,
-            show_social_mobile=excluded.show_social_mobile,show_social_desktop=excluded.show_social_desktop,
-            module_order_mobile=excluded.module_order_mobile,module_order_desktop=excluded.module_order_desktop,
-            module_widths_mobile=excluded.module_widths_mobile,module_widths_desktop=excluded.module_widths_desktop,
-            updated_at=CURRENT_TIMESTAMP""",
-            (scope, data.theme_key, data.display_name.strip() if data.display_name else None, data.welcome_text.strip(),
-             data.primary_color.lower(), data.secondary_color.lower(), data.button_color.lower(),
-             data.background_style, data.background_color.lower(), int(data.background_same_frame),
-             data.background_fit_desktop, data.background_x_desktop, data.background_y_desktop,
-             data.background_fit_mobile, data.background_x_mobile, data.background_y_mobile,
-             data.background_image_opacity, data.background_overlay_opacity,
-             data.card_style, data.card_shape, data.card_opacity, data.logo_shape, data.logo_fit,
-             data.logo_size, data.logo_opacity, data.logo_background_color.lower(),
-             data.font_family, data.font_scale, data.text_color.lower(), data.button_shape,
-             data.button_label.strip(), data.stamp_shape, data.stamp_done_color.lower(),
-             data.stamp_pending_color.lower(), data.progress_start_color.lower(),
-             data.progress_end_color.lower(), data.progress_style, int(data.show_profile), int(data.show_rewards),
-             int(data.show_appointments), int(data.show_contact), int(data.show_business_hours),
-             int(data.show_campaign_title), int(data.show_campaign_stamps), int(data.show_campaign_progress),
-             int(data.show_campaign_reward), int(data.show_campaign_button),
-             data.contact_phone, data.whatsapp_number, data.address, data.instagram_url, data.facebook_url,
-             data.tiktok_url, data.website_url, data.maps_url, data.social_display_mode, data.social_size,
-             data.social_layout, data.social_position, int(data.show_social_mobile), int(data.show_social_desktop),
-             data.module_order_mobile, data.module_order_desktop, data.module_widths_mobile, data.module_widths_desktop))
+        _save_branding_fields(con, scope, {
+            "theme_key": data.theme_key, "display_name": data.display_name.strip() if data.display_name else None,
+            "welcome_text": data.welcome_text.strip(), "primary_color": data.primary_color.lower(),
+            "secondary_color": data.secondary_color.lower(), "button_color": data.button_color.lower(),
+            "background_style": data.background_style, "background_color": data.background_color.lower(),
+            "background_same_frame": int(data.background_same_frame), "background_fit_desktop": data.background_fit_desktop,
+            "background_x_desktop": data.background_x_desktop, "background_y_desktop": data.background_y_desktop,
+            "background_fit_mobile": data.background_fit_mobile, "background_x_mobile": data.background_x_mobile,
+            "background_y_mobile": data.background_y_mobile, "background_image_opacity": data.background_image_opacity,
+            "background_overlay_opacity": data.background_overlay_opacity, "card_style": data.card_style,
+            "card_shape": data.card_shape, "card_opacity": data.card_opacity, "logo_shape": data.logo_shape,
+            "logo_fit": data.logo_fit, "logo_size": data.logo_size, "logo_opacity": data.logo_opacity,
+            "logo_background_color": data.logo_background_color.lower(), "font_family": data.font_family,
+            "font_scale": data.font_scale, "text_color": data.text_color.lower(), "button_shape": data.button_shape,
+            "button_label": data.button_label.strip(), "stamp_shape": data.stamp_shape,
+            "stamp_done_color": data.stamp_done_color.lower(), "stamp_pending_color": data.stamp_pending_color.lower(),
+            "progress_start_color": data.progress_start_color.lower(), "progress_end_color": data.progress_end_color.lower(),
+            "progress_style": data.progress_style, "show_profile": int(data.show_profile), "show_rewards": int(data.show_rewards),
+            "show_appointments": int(data.show_appointments), "show_contact": int(data.show_contact),
+            "show_business_hours": int(data.show_business_hours), "show_campaign_title": int(data.show_campaign_title),
+            "show_campaign_stamps": int(data.show_campaign_stamps), "show_campaign_progress": int(data.show_campaign_progress),
+            "show_campaign_reward": int(data.show_campaign_reward), "show_campaign_button": int(data.show_campaign_button),
+            "contact_phone": data.contact_phone, "whatsapp_number": data.whatsapp_number, "address": data.address,
+            "instagram_url": data.instagram_url, "facebook_url": data.facebook_url, "tiktok_url": data.tiktok_url,
+            "website_url": data.website_url, "maps_url": data.maps_url, "social_display_mode": data.social_display_mode,
+            "social_size": data.social_size, "social_layout": data.social_layout, "social_position": data.social_position,
+            "show_social_mobile": int(data.show_social_mobile), "show_social_desktop": int(data.show_social_desktop),
+            "module_order_mobile": data.module_order_mobile, "module_order_desktop": data.module_order_desktop,
+            "module_widths_mobile": data.module_widths_mobile, "module_widths_desktop": data.module_widths_desktop,
+        })
         con.execute("UPDATE business_branding SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?", (scope,))
         audit(con, user, "update", "business_branding", scope,
               {"background_style": data.background_style, "card_style": data.card_style})
@@ -1679,11 +1672,7 @@ def update_branding_logo(data: BrandingLogoInput,
         require_user_module(con, user, "public_page")
         if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        con.execute("""INSERT INTO business_branding (tenant_id,logo_mime,logo_blob)
-            VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET
-            logo_mime=excluded.logo_mime,logo_blob=excluded.logo_blob,updated_at=CURRENT_TIMESTAMP""",
-            (scope, mime, content))
-        con.execute("UPDATE business_branding SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?", (scope,))
+        _save_branding_fields(con, scope, {"logo_mime": mime, "logo_blob": content})
         audit(con, user, "update_logo", "business_branding", scope, {"mime": mime, "size": len(content)})
     return {"status": "saved", "logo_url": f"/api/public/branding/{scope}/logo"}
 
@@ -1748,10 +1737,7 @@ def update_branding_background(data: BrandingBackgroundInput,
         raise HTTPException(status_code=422, detail="El contenido del fondo no coincide con su formato")
     with connection() as con:
         require_user_module(con, user, "public_page")
-        con.execute("""INSERT INTO business_branding (tenant_id,background_mime,background_blob)
-            VALUES (?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET
-            background_mime=excluded.background_mime,background_blob=excluded.background_blob,
-            updated_at=strftime('%Y-%m-%d %H:%M:%f','now')""", (scope, mime, content))
+        _save_branding_fields(con, scope, {"background_mime": mime, "background_blob": content})
         audit(con, user, "update_background", "business_branding", scope, {"mime": mime, "size": len(content)})
     return {"status": "saved", "background_url": f"/api/public/branding/{scope}/background"}
 
@@ -1863,7 +1849,17 @@ def _settings_payload(con, tenant_id, branch_id=None, include_modules=False):
         "SELECT weekday, enabled, opens_at, closes_at FROM business_hours WHERE tenant_id=? AND branch_id IS ? ORDER BY weekday",
         (tenant_id, hours_branch_id),
     ).fetchall()
-    hours = [row_dict(row) for row in rows] or [dict(row) for row in DEFAULT_HOURS]
+    # Always return exactly one row for each weekday.  This prevents an old or
+    # partially migrated database from leaving blank controls in the editor.
+    by_day = {int(row["weekday"]): row_dict(row) for row in rows if row["weekday"] is not None}
+    hours = []
+    for day in range(7):
+        value = by_day.get(day, dict(DEFAULT_HOURS[day]))
+        value["weekday"] = day
+        value["enabled"] = bool(value.get("enabled"))
+        value["opens_at"] = str(value.get("opens_at") or "00:00")[:5]
+        value["closes_at"] = str(value.get("closes_at") or "23:59")[:5]
+        hours.append(value)
     payload = {
         "tenant_id": tenant_id,
         "branch_id": branch_id,
@@ -1981,11 +1977,14 @@ def update_service_settings(data: ServiceSettingsInput, tenant_id: int | None = 
                 "UPDATE branches SET manual_closed=?, closed_message=?, schedule_mode=? WHERE id=?",
                 (int(data.manual_closed), data.closed_message.strip(), data.schedule_mode, branch_id),
             )
+        # An inherited branch must not keep a hidden custom schedule: remove
+        # any old branch rows and let service_status use the business hours.
         con.execute("DELETE FROM business_hours WHERE tenant_id=? AND branch_id IS ?", (scope, branch_id))
-        con.executemany(
-            "INSERT INTO business_hours (tenant_id, branch_id, weekday, enabled, opens_at, closes_at) VALUES (?, ?, ?, ?, ?, ?)",
-            [(scope, branch_id, item.weekday, int(item.enabled), item.opens_at, item.closes_at) for item in data.hours],
-        )
+        if branch_id is None or data.schedule_mode == "custom":
+            con.executemany(
+                "INSERT INTO business_hours (tenant_id, branch_id, weekday, enabled, opens_at, closes_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [(scope, branch_id, item.weekday, int(item.enabled), item.opens_at, item.closes_at) for item in data.hours],
+            )
         if user["role"] == "super_admin":
             current = effective_modules(con, scope, branch_id)
             values = {key: bool(data.modules.get(key, current[key])) for key in MODULE_KEYS}
@@ -2570,10 +2569,13 @@ def update_program_icon(program_id: int, data: ProgramIconInput,
             raise HTTPException(status_code=404, detail="Campaña no encontrada")
         tenant_scope(user, program["tenant_id"])
         require_user_module(con, user, "loyalty")
-        con.execute("""INSERT INTO program_icons (program_id,tenant_id,icon_mime,icon_blob)
-            VALUES (?,?,?,?) ON CONFLICT(program_id) DO UPDATE SET
-            icon_mime=excluded.icon_mime,icon_blob=excluded.icon_blob,updated_at=CURRENT_TIMESTAMP""",
-            (program_id, program["tenant_id"], mime, content))
+        existing = con.execute("SELECT 1 FROM program_icons WHERE program_id=? LIMIT 1", (program_id,)).fetchone()
+        if existing:
+            con.execute("UPDATE program_icons SET tenant_id=?,icon_mime=?,icon_blob=?,updated_at=CURRENT_TIMESTAMP WHERE program_id=?",
+                        (program["tenant_id"], mime, content, program_id))
+        else:
+            con.execute("INSERT INTO program_icons (program_id,tenant_id,icon_mime,icon_blob) VALUES (?,?,?,?)",
+                        (program_id, program["tenant_id"], mime, content))
         audit(con, user, "update_icon", "loyalty_program", program_id, {"mime": mime, "size": len(content)})
     return {"status": "saved", "icon_url": f"/api/public/loyalty-programs/{program_id}/icon"}
 
