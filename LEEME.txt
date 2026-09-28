@@ -1,25 +1,3 @@
-NEGROSKY — COMPRAS SIN SUCURSAL
-
-1. Extrae los archivos APLICAR_SIN_SUCURSAL.py y .bat junto a la carpeta app
-   de tu proyecto actual (no dentro de app).
-2. Ejecuta APLICAR_SIN_SUCURSAL.bat y comprueba que dice PARCHE APLICADO.
-3. Publica la carpeta completa del proyecto con tu publicador rapido.
-4. Espera el despliegue. Genera un QR nuevo y autoriza una compra.
-
-El instalador valida los fragmentos antes de escribir y guarda respaldo del
-codigo en NEGROSKY_RESPALDOS dentro de tu carpeta de usuario. Conserva los
-cambios ajenos al parche, incluido el arreglo del diseno. No es el proyecto
-completo. Si informa version diferente, no publiques: envia tu ZIP actual.
-
-La primera compra sin sucursal habilita branch_id opcional en purchases.
-PostgreSQL usa ALTER COLUMN DROP NOT NULL (necesita permiso de propietario).
-SQLite reconstruye la tabla dentro de la transaccion, conservando registros,
-claves e indices. Guarda un respaldo de tu base antes del despliegue.
-No crea sucursales ficticias ni asigna al trabajador a otra sucursal.
-Mantiene autorizacion, permisos, horarios, negocio y restricciones del QR.
-El historial usa LEFT JOIN para mostrar compras sin sucursal.
-Tambien permite entregar premios sin sucursal.
-
-Pruebas: 7 correctas en entorno local (SQLite y modelo de transacciones PG).
-No se ha probado contra tu PostgreSQL/Render real ni desplegado por ti.
-Si aparece otro error, envia el mensaje y el log sin credenciales.
+Coloca los archivos .py y .bat junto a la carpeta app del proyecto. Ejecuta el .bat. Publica la carpeta COMPLETA con el publicador. Espera el despliegue y descarga otra vez el QR del negocio o regenera el cartel. Un QR ya impreso con :8030 seguira apuntando al puerto incorrecto.
+Este parche modifica solo la construccion de la URL del QR publico; conserva todos los otros cambios y no modifica la base de datos. Guarda respaldo automatico de app/main.py.
+Pruebas locales: HTTPS sin puerto, LAN con 8030 y HTTPS con puerto personalizado. No se ha probado el enlace real del celular. Si sigue blanco, envia la URL exacta que abre.
