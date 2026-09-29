@@ -81,42 +81,36 @@ function stopCamera(){
   $('camera-shell')?.classList.add('hidden');
 }
 function cameraFound(code){
-  const value=cleanCode(code);
+  $('operation-code').value=cleanCode(code);
   stopCamera();
-  if(value.length!==6){$('worker-result').className='status-panel error';$('worker-result').textContent='El QR no contiene un código válido de seis números.';return}
-  $('operation-code').value=value;
   loadPreview();
 }
 $('camera-close').onclick=stopCamera;
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera()});
-window.addEventListener('pagehide',stopCamera);
 $('scan-button').onclick=async()=>{
   armWorkerSound();
-  const result=$('worker-result');
-  if(!window.isSecureContext){result.className='status-panel error';result.textContent='La cámara requiere HTTPS o localhost. Puedes usar “Elegir foto” para escanear un QR.';scanQrFromIphone();return}
-  if(!navigator.mediaDevices?.getUserMedia){result.className='status-panel error';result.textContent='Este navegador no permite cámara en esta página. Usa “Elegir foto” para escanear.';scanQrFromIphone();return}
+  if(!window.isSecureContext){$('worker-result').className='status-panel error';$('worker-result').textContent='La cámara solo funciona con la dirección HTTPS.';return}
+  if(!navigator.mediaDevices?.getUserMedia||!window.isSecureContext){scanQrFromIphone();return}
   const shell=$('camera-shell'),video=$('camera'),status=$('camera-status');
   stopCamera(); shell.classList.remove('hidden'); status.textContent='Solicitando permiso para la cámara…';
   try{
-    const preferred={video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false};
-    try{activeCameraStream=await navigator.mediaDevices.getUserMedia(preferred)}catch(first){activeCameraStream=await navigator.mediaDevices.getUserMedia({video:true,audio:false})}
-    video.srcObject=activeCameraStream;video.setAttribute('playsinline','');video.setAttribute('webkit-playsinline','');video.muted=true;
-    await video.play();status.textContent='Enfoca el QR dentro de la cámara…';
+    activeCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},resizeMode:'none'},audio:false});
+    video.srcObject=activeCameraStream; video.setAttribute('playsinline',''); video.setAttribute('webkit-playsinline',''); video.muted=true;
+    await video.play(); status.textContent='Buscando código…';
     const scan=async()=>{
       if(!activeCameraStream||shell.classList.contains('hidden'))return;
       try{
         if('BarcodeDetector' in window){
-          if(!scan.detector)scan.detector=new BarcodeDetector({formats:['qr_code']});
+          if(!scan.detector){scan.detector=new BarcodeDetector({formats:['qr_code']})}
           const codes=await scan.detector.detect(video);
           if(codes.length){cameraFound(codes[0].rawValue);return}
-        }
-        if(window.jsQR&&video.videoWidth){
+        }else if(window.jsQR&&video.videoWidth){
           if(!scan.canvas)scan.canvas=document.createElement('canvas');
           if(!scan.ctx)scan.ctx=scan.canvas.getContext('2d',{willReadFrequently:true});
           const scale=Math.min(1,1280/video.videoWidth);scan.canvas.width=Math.max(1,Math.round(video.videoWidth*scale));scan.canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
           scan.ctx.drawImage(video,0,0,scan.canvas.width,scan.canvas.height);
-          const image=scan.ctx.getImageData(0,0,scan.canvas.width,scan.canvas.height),found=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});
-          if(found?.data){cameraFound(found.data);return}
+          const image=scan.ctx.getImageData(0,0,scan.canvas.width,scan.canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});
+          if(code?.data){cameraFound(code.data);return}
         }
       }catch(e){}
       cameraFrameId=requestAnimationFrame(scan);
@@ -124,9 +118,8 @@ $('scan-button').onclick=async()=>{
     scan();
   }catch(e){
     stopCamera();
-    if(['NotAllowedError','SecurityError'].includes(e.name)){result.className='status-panel error';result.textContent='Permiso de cámara denegado. Actívalo en el navegador o usa “Elegir foto” para continuar.';scanQrFromIphone()}
-    else if(['NotFoundError','OverconstrainedError'].includes(e.name)){result.className='status-panel error';result.textContent='No se encontró una cámara disponible. Usa “Elegir foto” para escanear.';scanQrFromIphone()}
-    else{result.className='status-panel error';result.textContent=e.message||'No fue posible abrir la cámara.'}
+    if(['NotAllowedError','NotFoundError','SecurityError','OverconstrainedError'].includes(e.name))scanQrFromIphone();
+    else{$('worker-result').className='status-panel error';$('worker-result').textContent=e.message||'No fue posible abrir la cámara.'}
   }
 };
 if(queryCode)$('pending-login-note').classList.remove('hidden');

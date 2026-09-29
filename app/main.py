@@ -42,20 +42,14 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.56.1")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
-async def response_cache_policy(request, call_next):
+async def no_browser_cache(request, call_next):
     response = await call_next(request)
-    # API responses and HTML must remain fresh because they contain session and
-    # business data. Static assets are versioned with query strings in the
-    # templates, so they can be cached safely and avoid repeated downloads.
-    if request.url.path.startswith("/static/") and request.url.path.rsplit("/", 1)[-1].split(".")[-1] in {"js", "css", "svg", "webmanifest", "wav", "png", "jpg", "jpeg", "webp"}:
-        response.headers["Cache-Control"] = "public, max-age=86400"
-    else:
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-        response.headers["Pragma"] = "no-cache"
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -780,10 +774,6 @@ def require_service_open(con, tenant_id, branch_id=None):
 
 
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
-    # Ruleta quedó fuera del producto actual. Mantener esta regla en el backend
-    # evita que una configuración antigua la reactive desde una interfaz vieja.
-    if module_key == "roulette":
-        return False
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
         "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=?",
@@ -975,10 +965,7 @@ def permanent_business_qr(public_key: str, branch: int | None = None):
     target = f"/b/{tenant['slug']}"
     if branch is not None:
         with connection() as con:
-            branch_row = con.execute(
-                "SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'",
-                (branch, tenant["id"]),
-            ).fetchone()
+            branch_row = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch, tenant["id"])).fetchone()
         if not branch_row:
             raise HTTPException(status_code=404, detail="Sucursal no encontrada")
         target += f"?branch={branch}"
@@ -1015,13 +1002,6 @@ def public_business_qr(slug: str, request: Request, branch_id: int | None = None
         raise HTTPException(status_code=404, detail="Negocio no encontrado")
     with connection() as con:
         require_public_module(con, tenant["id"], "public_page")
-        if branch_id is not None:
-            branch_row = con.execute(
-                "SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'",
-                (branch_id, tenant["id"]),
-            ).fetchone()
-            if not branch_row:
-                raise HTTPException(status_code=404, detail="Sucursal no encontrada")
     import qrcode
     host = request.url.hostname or "127.0.0.1"
     if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
@@ -1036,22 +1016,22 @@ def public_business_qr(slug: str, request: Request, branch_id: int | None = None
             pass
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates: host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    base = public_base_url(request, host_override=host)
-    target = f"{base}/q/{tenant['public_key']}"
+    target = f"{public_base_url(request, host)}/q/{tenant['public_key']}"
     if branch_id is not None:
+        with connection() as con:
+            branch_row = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch_id, tenant["id"])).fetchone()
+        if not branch_row:
+            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
         target += f"?branch={branch_id}"
     output = io.BytesIO(); qrcode.make(target).save(output, format="PNG"); output.seek(0)
     return StreamingResponse(output, media_type="image/png", headers={"Cache-Control": "no-store", "X-QR-Target": target})
 
 
-def public_base_url(request: Request, host_override: str | None = None) -> str:
-    """Return a client-reachable base URL without leaking Render's internal port."""
+def public_base_url(request: Request, host: str | None = None) -> str:
     configured = (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
     if configured:
         return configured
-    host = host_override or request.url.hostname or "127.0.0.1"
-    # Render terminates TLS at its proxy. The app's $PORT must never be placed
-    # in a public QR or link (it produces 502 from a phone).
+    host = host or request.url.hostname or "127.0.0.1"
     if host.endswith(".onrender.com"):
         return f"https://{host}"
     port = request.url.port
@@ -1077,7 +1057,7 @@ def worker_link(request: Request, code: str) -> str:
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates:
             host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    return f"{public_base_url(request, host_override=host)}/worker?code={code}"
+    return f"{public_base_url(request, host)}/worker?code={code}"
 
 
 def usable_lan_address(value: str) -> bool:
@@ -1090,7 +1070,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.56.1", "build": "056.1", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
