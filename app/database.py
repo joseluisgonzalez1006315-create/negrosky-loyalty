@@ -104,18 +104,10 @@ class _PostgresConnection:
         raw = self._raw.execute(sql, params)
         cursor = _CompatCursor(raw, self)
         if re.match(r"\s*INSERT\s+INTO\b", sql, re.I) and " RETURNING " not in sql.upper():
-            # Tables such as business_branding use an explicit tenant_id and
-            # do not advance a sequence. Undefined lastval() aborts the PG
-            # transaction even when Python catches its exception. Isolate
-            # this optional lookup, preserving the successful INSERT.
-            self._raw.execute("SAVEPOINT negrosky_lastrowid")
             try:
                 cursor._lastrowid = self._raw.execute("SELECT lastval()").fetchone()[0]
             except Exception:
-                self._raw.execute("ROLLBACK TO SAVEPOINT negrosky_lastrowid")
                 cursor._lastrowid = None
-            finally:
-                self._raw.execute("RELEASE SAVEPOINT negrosky_lastrowid")
         return cursor
 
     def executemany(self, statement, params_seq):

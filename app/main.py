@@ -42,14 +42,20 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.56.1")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
-async def no_browser_cache(request, call_next):
+async def response_cache_policy(request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    # API responses and HTML must remain fresh because they contain session and
+    # business data. Static assets are versioned with query strings in the
+    # templates, so they can be cached safely and avoid repeated downloads.
+    if request.url.path.startswith("/static/") and request.url.path.rsplit("/", 1)[-1].split(".")[-1] in {"js", "css", "svg", "webmanifest", "wav", "png", "jpg", "jpeg", "webp"}:
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    else:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
     return response
 
 
@@ -774,6 +780,10 @@ def require_service_open(con, tenant_id, branch_id=None):
 
 
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
+    # Ruleta quedó fuera del producto actual. Mantener esta regla en el backend
+    # evita que una configuración antigua la reactive desde una interfaz vieja.
+    if module_key == "roulette":
+        return False
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
         "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=?",
@@ -954,7 +964,7 @@ def business_poster_page(slug: str):
     return FileResponse(WEB / "poster.html")
 
 @app.get("/q/{public_key}", include_in_schema=False)
-def permanent_business_qr(public_key: str):
+def permanent_business_qr(public_key: str, branch: int | None = None):
     init_db()
     with connection() as con:
         tenant = con.execute("SELECT id,slug FROM tenants WHERE public_key=? AND status='active' AND deleted_at IS NULL", (public_key,)).fetchone()
@@ -962,7 +972,17 @@ def permanent_business_qr(public_key: str):
         raise HTTPException(status_code=404, detail="Código del negocio no encontrado")
     with connection() as con:
         require_public_module(con, tenant["id"], "public_page")
-    return RedirectResponse(url=f"/b/{tenant['slug']}", status_code=307)
+    target = f"/b/{tenant['slug']}"
+    if branch is not None:
+        with connection() as con:
+            branch_row = con.execute(
+                "SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'",
+                (branch, tenant["id"]),
+            ).fetchone()
+        if not branch_row:
+            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        target += f"?branch={branch}"
+    return RedirectResponse(url=target, status_code=307)
 
 
 @app.get("/worker", include_in_schema=False)
@@ -987,7 +1007,7 @@ def qr_image(code: str, request: Request):
     )
 
 @app.get("/api/public/{slug}/qr.png", include_in_schema=False)
-def public_business_qr(slug: str, request: Request):
+def public_business_qr(slug: str, request: Request, branch_id: int | None = None):
     init_db()
     with connection() as con:
         tenant = con.execute("SELECT id,slug,public_key FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
@@ -995,6 +1015,13 @@ def public_business_qr(slug: str, request: Request):
         raise HTTPException(status_code=404, detail="Negocio no encontrado")
     with connection() as con:
         require_public_module(con, tenant["id"], "public_page")
+        if branch_id is not None:
+            branch_row = con.execute(
+                "SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'",
+                (branch_id, tenant["id"]),
+            ).fetchone()
+            if not branch_row:
+                raise HTTPException(status_code=404, detail="Sucursal no encontrada")
     import qrcode
     host = request.url.hostname or "127.0.0.1"
     if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
@@ -1009,9 +1036,28 @@ def public_business_qr(slug: str, request: Request):
             pass
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates: host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    target = f"{request.url.scheme}://{host}:{request.url.port or 8030}/q/{tenant['public_key']}"
+    base = public_base_url(request, host_override=host)
+    target = f"{base}/q/{tenant['public_key']}"
+    if branch_id is not None:
+        target += f"?branch={branch_id}"
     output = io.BytesIO(); qrcode.make(target).save(output, format="PNG"); output.seek(0)
     return StreamingResponse(output, media_type="image/png", headers={"Cache-Control": "no-store", "X-QR-Target": target})
+
+
+def public_base_url(request: Request, host_override: str | None = None) -> str:
+    """Return a client-reachable base URL without leaking Render's internal port."""
+    configured = (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if configured:
+        return configured
+    host = host_override or request.url.hostname or "127.0.0.1"
+    # Render terminates TLS at its proxy. The app's $PORT must never be placed
+    # in a public QR or link (it produces 502 from a phone).
+    if host.endswith(".onrender.com"):
+        return f"https://{host}"
+    port = request.url.port
+    if port is None or (request.url.scheme == "https" and port == 443) or (request.url.scheme == "http" and port == 80):
+        return f"{request.url.scheme}://{host}"
+    return f"{request.url.scheme}://{host}:{port}"
 
 
 def worker_link(request: Request, code: str) -> str:
@@ -1031,7 +1077,7 @@ def worker_link(request: Request, code: str) -> str:
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates:
             host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    return f"{request.url.scheme}://{host}:{request.url.port or 8030}/worker?code={code}"
+    return f"{public_base_url(request, host_override=host)}/worker?code={code}"
 
 
 def usable_lan_address(value: str) -> bool:
@@ -1044,7 +1090,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.56.1", "build": "056.1", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3615,17 +3661,13 @@ def notification_stream(after_id: int | None = None,
         params.append(user["branch_id"])
     with connection() as con:
         if after_id is None:
-            # Build the aggregate independently.  The former ``replace`` no
-            # longer matched after image_url was added to the select list, so
-            # an empty notification table returned no row and the first
-            # notification poll failed with ``NoneType is not subscriptable``.
-            latest_query = "SELECT MAX(n.id) AS latest FROM notifications n WHERE 1=1"
-            if user["role"] != "super_admin":
-                latest_query += " AND n.tenant_id=?"
-            if user["role"] == "branch_admin":
-                latest_query += " AND n.branch_id=?"
-            latest_row = con.execute(latest_query, params).fetchone()
-            latest = (latest_row["latest"] if latest_row else 0) or 0
+            latest = con.execute(
+                query.replace(
+                    "SELECT n.id,n.title,n.message,n.event_type,t.name business_name",
+                    "SELECT MAX(n.id) latest",
+                ),
+                params,
+            ).fetchone()["latest"] or 0
             return {"last_id": latest, "items": []}
         rows = con.execute(query + " AND n.id>? ORDER BY n.id LIMIT 30", (*params, max(0, after_id))).fetchall()
     return {"last_id": rows[-1]["id"] if rows else after_id, "items": [row_dict(row) for row in rows]}
