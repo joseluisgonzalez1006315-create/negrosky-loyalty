@@ -918,13 +918,8 @@ def customer_manifest(slug: str):
 
 @app.get("/b/{slug}", include_in_schema=False)
 def customer_page(slug: str):
-    init_db()
-    with connection() as con:
-        tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
-        if not tenant:
-            raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        require_public_module(con, tenant["id"], "public_page")
-    return FileResponse(WEB / "customer.html")
+    # Entregar el shell inmediatamente. La validación real ocurre en /branding.
+    return FileResponse(WEB / "customer.html", headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=300"})
 
 @app.get("/cliente", include_in_schema=False)
 def customer_directory_page():
