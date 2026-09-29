@@ -1,4 +1,4 @@
-const ES=window.NegroskyES;let customerTimeZone='America/Bogota';const $=id=>document.getElementById(id),slug=location.pathname.replace(/\/+$/,'').split('/').pop()||'',initialBranchId=Number(new URLSearchParams(location.search).get('branch'))||null;let token=localStorage.getItem(`customer_${slug}`);if(token){document.documentElement.classList.add('customer-session');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.add('hidden')}else{$('customer-home')?.classList.add('hidden')} $('customer-name')?.removeAttribute('placeholder');$('customer-phone')?.removeAttribute('placeholder');$('customer-phone')?.setAttribute('maxlength','10');$('customer-phone')?.setAttribute('pattern','[0-9]{10}');
+document.documentElement.classList.add('customer-loading');const ES=window.NegroskyES;let customerTimeZone='America/Bogota';const $=id=>document.getElementById(id),slug=location.pathname.replace(/\/+$/,'').split('/').pop()||'',initialBranchId=Number(new URLSearchParams(location.search).get('branch'))||null;let token=localStorage.getItem(`customer_${slug}`);if(token){document.documentElement.classList.add('customer-session');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.add('hidden')}else{$('customer-home')?.classList.add('hidden')} $('customer-name')?.removeAttribute('placeholder');$('customer-phone')?.removeAttribute('placeholder');$('customer-phone')?.setAttribute('maxlength','10');$('customer-phone')?.setAttribute('pattern','[0-9]{10}');
 if(token)document.body.classList.add('customer-authenticated');
 if(!token){const hidePreLoginRoulette=()=>document.getElementById('customer-roulette')?.classList.add('hidden');hidePreLoginRoulette();setInterval(hidePreLoginRoulette,500)}
 let deferredInstallPrompt=null;
@@ -102,6 +102,8 @@ function applyPublicBranding(b){
   else {logo.textContent=(b.display_name||'N').trim().charAt(0).toUpperCase()||'N'}
   renderPublicBusinessInfo(b);applyCustomerModuleOrder(b);
   document.title=`${b.display_name} · Mi tarjeta`;
+  document.documentElement.classList.remove('customer-loading');
+  document.documentElement.classList.add('customer-ready');
 }
 async function loadPublicBranding(){try{
   const r=await fetch(`/api/public/${slug}/branding?refresh=${Date.now()}`,{cache:'no-store'});
@@ -110,7 +112,7 @@ async function loadPublicBranding(){try{
   const b=await r.json(),wasLoaded=!!publicBrandingFingerprint;
   const fingerprint=JSON.stringify(b);
   if(fingerprint!==publicBrandingFingerprint){publicBrandingFingerprint=fingerprint;applyPublicBranding(b);if(wasLoaded&&token)showHome().catch(()=>{})}
-}catch(e){if(e.message==='branding_404'){showPublicPageDisabled();return}console.warn('No se pudo cargar la personalización del negocio',e)}}
+}catch(e){document.documentElement.classList.remove('customer-loading');if(e.message==='branding_404'){showPublicPageDisabled();return}console.warn('No se pudo cargar la personalización del negocio',e)}}
 async function loadPublicBranches(){try{const rows=await fetch(`/api/public/${slug}/branches`).then(r=>r.ok?r.json():[]);if(!rows.length)return;const label=document.createElement('label');label.innerHTML=`Sucursal que visitas<select id="customer-branch"><option value="">Selecciona una sucursal</option>${rows.map(b=>`<option value="${b.id}">${b.name}${b.city?' · '+b.city:''}</option>`).join('')}</select>`;$('customer-phone').closest('label').after(label);if(initialBranchId&&rows.some(b=>Number(b.id)===initialBranchId))$('customer-branch').value=String(initialBranchId)}catch(e){}}
 async function identifyFromDirectory(){try{const saved=JSON.parse(localStorage.getItem('negrosky_global_customer')||'null');if(!saved?.phone)return false;const r=await api(`/api/public/${slug}/identify`,{method:'POST',body:JSON.stringify({name:saved.name||null,phone:saved.phone,marketing_consent:false,branch_id:initialBranchId})});token=r.access_token;localStorage.setItem(`customer_${slug}`,token);document.documentElement.classList.add('customer-session');$('identify-box')?.classList.add('hidden');return true}catch(e){return false}}
 function openWhatsAppOptIn(name,phone,blankWindow){const number=String(publicBranding?.whatsapp_number||'').replace(/\D/g,'');if(!number)return false;const message=`Hola, quiero recibir promociones e información por WhatsApp. Mi nombre es ${String(name||'').trim()}.`;const url=`https://wa.me/${number}?text=${encodeURIComponent(message)}`;if(blankWindow)blankWindow.location.href=url;else window.open(url,'_blank','noopener');localStorage.setItem(`negrosky_whatsapp_optin_${slug}_${String(phone).replace(/\D/g,'')}`,'1');return true}
@@ -143,7 +145,7 @@ function operationError(message){showToast(message,'error');const banner=$('serv
 async function purchase(id){armSound();const renew=()=>api('/api/public/me/purchase-token',{method:'POST',body:JSON.stringify({program_id:id})});try{await displayQr(await renew(),renew)}catch(e){operationError(e.message)}}
 async function rewardBatch(programId,quantity){armSound();const renew=()=>api('/api/public/me/rewards/batch-token',{method:'POST',body:JSON.stringify({program_id:programId,quantity})});try{await displayQr(await renew(),renew)}catch(e){operationError(e.message)}}
 // Mantiene abierta la vista del cliente sincronizada cuando el negocio guarda cambios desde el panel.
-setTimeout(loadPublicBranding,5000);
+setTimeout(loadPublicBranding,30000);
 loadPublicBranding().then(async()=>{if(!token)await identifyFromDirectory();if(token)return showHome()}).catch(error=>{console.warn('No se pudo iniciar la vista del cliente',error);if(token){document.documentElement.classList.add('customer-session');document.documentElement.classList.add('customer-ready');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.remove('hidden');const notice=$('customer-error');if(notice)notice.textContent='La conexión está tardando. Pulsa recargar para intentarlo de nuevo.'}else{$('identify-box')?.classList.remove('hidden');$('customer-home')?.classList.add('hidden')}});
 
 let serviceOpen=true;
