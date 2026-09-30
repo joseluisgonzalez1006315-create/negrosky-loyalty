@@ -2903,6 +2903,20 @@ def customer_cards(customer=Depends(current_customer)):
     return {"customer": customer, "cards": card_items, "rewards": [row_dict(r) for r in rewards],
             "enabled_modules": enabled_modules}
 
+def raffle_expired(row):
+    """Return True when a raffle has reached its configured draw date."""
+    raw = row["draw_at"] if row is not None and "draw_at" in row.keys() else None
+    if not raw:
+        return False
+    try:
+        value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=ZoneInfo("America/Bogota"))
+        return datetime.now(timezone.utc) >= value.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
 @app.get("/api/public/me/raffles")
 def customer_raffles(customer=Depends(current_customer)):
     with connection() as con:
@@ -2912,7 +2926,7 @@ def customer_raffles(customer=Depends(current_customer)):
         for r in rows:
             mine=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND customer_phone=?",(r["id"],customer.get("phone"))).fetchone()["n"]
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
-            out.append({**row_dict(r),"my_tickets":mine,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
+            out.append({**row_dict(r),"expired":raffle_expired(r),"my_tickets":mine,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
         return out
 
 @app.post("/api/public/me/raffles/{raffle_id}/participate", status_code=201)
@@ -2922,6 +2936,8 @@ def participate_raffle(raffle_id:int, data: dict | None = None, request: Request
             raise HTTPException(404,"Rifas no disponibles")
         r=con.execute("SELECT * FROM raffles WHERE id=? AND tenant_id=? AND status='active'",(raffle_id,customer["tenant_id"])).fetchone()
         if not r: raise HTTPException(404,"Rifa no disponible")
+        if raffle_expired(r):
+            raise HTTPException(409,"La fecha de esta rifa ya terminó; ya no se pueden comprar boletas")
         # La cantidad permitida se aplica por compra. Las compras validadas no
         # bloquean una nueva compra del mismo cliente.
         current=0
@@ -2977,7 +2993,7 @@ def public_raffles_by_slug(slug: str):
         out=[]
         for r in rows:
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
-            out.append({**row_dict(r),"my_tickets":0,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
+            out.append({**row_dict(r),"expired":raffle_expired(r),"my_tickets":0,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
         return out
 
 @app.get("/api/public/me/roulette")

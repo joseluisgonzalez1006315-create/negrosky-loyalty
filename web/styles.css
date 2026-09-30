@@ -267,3 +267,6 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 #customer-raffles .raffle-winner-photo{max-width:min(100%,360px)!important;width:auto!important}
 #customer-raffles .raffle-winner-photo img{width:auto!important;max-width:100%!important;height:auto!important;max-height:360px!important;object-fit:contain!important;background:transparent!important;object-position:center!important}
 @media(max-width:520px){#customer-raffles .raffle-prize-image{max-height:280px!important}#customer-raffles .raffle-winner-photo img{max-height:280px!important}}
+/* Build 098: rifa cerrada por fecha */
+#customer-raffles .raffle-expired-notice{display:grid;gap:6px;margin-top:16px;padding:16px;border-radius:14px;text-align:center;background:#3f1d1d;border:1px solid #f87171;color:#fecaca}
+#customer-raffles .raffle-expired-notice b{font-size:18px;color:#fca5a5;letter-spacing:.08em}
