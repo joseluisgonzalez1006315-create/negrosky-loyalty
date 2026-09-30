@@ -1,1 +1,1 @@
-BUILD 077 - Rifas ilimitadas con números elegidos
+BUILD 078 - Validación de números elegidos
