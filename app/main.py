@@ -29,7 +29,7 @@ from .schemas import (
     OperationTokenInput, RewardBatchInput, TenantInput, TenantUpdate, UserInput, ValidateOperationInput, LoyaltyProgramUpdate, LoyaltyProgramStatusUpdate,
     ServiceSettingsInput, CopyServiceSettingsInput, UserUpdate, UserStatusInput,
     PasswordChangeInput, SupportCodeInput, SupportResetInput, AssistedCustomerInput,
-    CustomerMetaInput, MergeCustomersInput, RestoreBackupInput, ResetPlatformInput,
+    CustomerMetaInput, CustomerProfileInput, MergeCustomersInput, RestoreBackupInput, ResetPlatformInput,
     AppointmentServiceInput, AppointmentServiceStatusInput, AppointmentBookingInput,
     AppointmentStatusInput, AppointmentCancelInput, AppointmentDelayInput,
     BrandingInput, BrandingLogoInput, BrandingBackgroundInput, ProgramIconInput,
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.68")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.70")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -957,7 +957,7 @@ def pwa_manifest():
 
 @app.get("/service-worker.js", include_in_schema=False)
 def pwa_service_worker():
-    return FileResponse(WEB / "service-worker.js", media_type="application/javascript")
+    return FileResponse(WEB / "service-worker.js", media_type="application/javascript", headers={"Cache-Control":"no-store"})
 
 @app.get("/api/public/{slug}/manifest.webmanifest", include_in_schema=False)
 def customer_manifest(slug: str):
@@ -979,7 +979,7 @@ def customer_manifest(slug: str):
 
 @app.get("/b/{slug}", include_in_schema=False)
 def customer_page(slug: str):
-    return FileResponse(WEB / "customer.html", headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=300"})
+    return FileResponse(WEB / "customer.html", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma":"no-cache"})
 
 @app.get("/cliente", include_in_schema=False)
 def customer_directory_page():
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.68", "build": "068", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.70", "build": "070", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -2789,6 +2789,20 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
             customer = con.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
     safe = row_dict(customer)
     return {"customer": safe, "access_token": create_customer_token(safe), "token_type": "bearer"}
+
+@app.put("/api/public/me/profile")
+def update_customer_profile(data: CustomerProfileInput, customer=Depends(current_customer)):
+    """Actualiza el perfil conservando el ID y el progreso del cliente."""
+    phone = "".join(ch for ch in data.phone if ch.isdigit())
+    name = data.name.strip()
+    with connection() as con:
+        duplicate = con.execute("SELECT id FROM customers WHERE tenant_id=? AND phone=? AND id<>? AND status!='merged'", (customer["tenant_id"], phone, customer["id"])).fetchone()
+        if duplicate: raise HTTPException(status_code=409, detail="Ese celular ya pertenece a otro cliente")
+        con.execute("UPDATE customers SET name=?, search_key=?, phone=?, birth_date=?, birthday_consent=? WHERE id=? AND tenant_id=? AND status='active'", (name, normalize_search(name), phone, data.birth_date, int(bool(data.birthday_consent)), customer["id"], customer["tenant_id"]))
+        updated=con.execute("SELECT * FROM customers WHERE id=? AND tenant_id=?", (customer["id"], customer["tenant_id"])).fetchone()
+    if not updated: raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return {"customer": row_dict(updated), "message":"Perfil actualizado correctamente"}
+
 
 @app.get("/api/public/{slug}/branches")
 def public_branches(slug: str):

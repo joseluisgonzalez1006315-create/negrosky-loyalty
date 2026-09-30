@@ -1,1 +1,1 @@
-BUILD 069 - guardado de modulos corregido
+BUILD 070 - perfil del cliente y cache actualizado

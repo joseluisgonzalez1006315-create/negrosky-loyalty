@@ -221,3 +221,5 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 .whatsapp-action{display:inline-flex;align-items:center;gap:4px;padding:7px 10px;border-radius:10px;background:#16a34a;color:#fff!important;font-weight:700;text-decoration:none;white-space:nowrap}.whatsapp-action:hover{filter:brightness(1.08)}
 
 .customer-loading-card{min-height:120px;padding:22px;border-radius:20px;background:linear-gradient(110deg,var(--card,#171626) 8%,#252238 18%,var(--card,#171626) 33%);background-size:220% 100%;animation:customer-skeleton 1.15s linear infinite;display:grid;align-content:center;gap:10px}.customer-loading-card span{display:block;height:12px;border-radius:8px;background:#ffffff20}.customer-loading-card span:first-child{width:48%;height:18px}.customer-loading-card span:last-child{width:72%}@keyframes customer-skeleton{to{background-position:-220% 0}}
+
+.customer-profile-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}.customer-profile-actions button{flex:1 1 150px}.customer-profile-editor{margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.12)}
