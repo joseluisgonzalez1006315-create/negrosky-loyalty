@@ -1719,7 +1719,7 @@ def public_branding(slug: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
-        return branding_payload(con, tenant["id"])
+        return JSONResponse(branding_payload(con, tenant["id"]), headers={"Cache-Control": "public, max-age=15, stale-while-revalidate=60"})
 
 
 @app.get("/api/public/branding/{tenant_id}/logo", include_in_schema=False)
@@ -1733,7 +1733,7 @@ def public_branding_logo(tenant_id: int):
     if not row or not row["logo_blob"]:
         raise HTTPException(status_code=404, detail="Logo no encontrado")
     return StreamingResponse(io.BytesIO(row["logo_blob"]), media_type=row["logo_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 
 @app.post("/api/branding/background")
@@ -1787,7 +1787,7 @@ def public_branding_background(tenant_id: int):
     if not row or not row["background_blob"]:
         raise HTTPException(status_code=404, detail="Fondo no encontrado")
     return StreamingResponse(io.BytesIO(row["background_blob"]), media_type=row["background_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 
 @app.delete("/api/branding/reset")
@@ -2627,7 +2627,7 @@ def public_program_icon(program_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Icono no encontrado")
     return StreamingResponse(io.BytesIO(row["icon_blob"]), media_type=row["icon_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 @app.put("/api/loyalty-programs/{program_id}/status")
 def update_program_status(program_id: int, data: LoyaltyProgramStatusUpdate, user=Depends(require("super_admin", "business_admin"))):

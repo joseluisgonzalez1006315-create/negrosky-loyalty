@@ -1,6 +1,6 @@
 document.documentElement.classList.add('customer-loading');const ES=window.NegroskyES;let customerTimeZone='America/Bogota';const $=id=>document.getElementById(id),slug=location.pathname.replace(/\/+$/,'').split('/').pop()||'';let token=localStorage.getItem(`customer_${slug}`);if(token){document.documentElement.classList.add('customer-session');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.add('hidden')}else{$('customer-home')?.classList.add('hidden')} $('customer-name')?.removeAttribute('placeholder');$('customer-phone')?.removeAttribute('placeholder');$('customer-phone')?.setAttribute('maxlength','10');$('customer-phone')?.setAttribute('pattern','[0-9]{10}');
 if(token)document.body.classList.add('customer-authenticated');
-if(!token){const hidePreLoginRoulette=()=>document.getElementById('customer-roulette')?.classList.add('hidden');hidePreLoginRoulette();setInterval(hidePreLoginRoulette,500)}
+if(!token){const hidePreLoginRoulette=()=>document.getElementById('customer-roulette')?.classList.add('hidden');hidePreLoginRoulette()}
 let deferredInstallPrompt=null;
 if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;document.getElementById('install-customer-app')?.classList.remove('hidden')});
@@ -77,7 +77,12 @@ function applyPublicBranding(b){
   document.documentElement.style.setProperty('--brand-stamp-pending',b.stamp_pending_color);
   document.documentElement.style.setProperty('--brand-progress-start',b.progress_start_color);
   document.documentElement.style.setProperty('--brand-progress-end',b.progress_end_color);
-  document.documentElement.style.setProperty('--brand-bg-image',b.background_url?`url(${b.background_url}?v=${encodeURIComponent(b.updated_at||Date.now())})`:'none');
+  // Pintamos primero el contenido; el fondo grande se descarga después del primer cuadro.
+  document.documentElement.style.setProperty('--brand-bg-image','none');
+  if(b.background_url){
+    const applyBackground=()=>document.documentElement.style.setProperty('--brand-bg-image',`url(${b.background_url}?v=${encodeURIComponent(b.updated_at||Date.now())})`);
+    if('requestIdleCallback' in window) requestIdleCallback(applyBackground,{timeout:700}); else setTimeout(applyBackground,120);
+  }
   document.documentElement.style.setProperty('--brand-bg-fit-desktop',b.background_fit_desktop||'cover');
   document.documentElement.style.setProperty('--brand-bg-x-desktop',(b.background_x_desktop??50)+'%');
   document.documentElement.style.setProperty('--brand-bg-y-desktop',(b.background_y_desktop??50)+'%');
@@ -98,14 +103,14 @@ function applyPublicBranding(b){
   $('business-title').textContent=b.display_name;
   $('business-welcome').textContent=b.welcome_text;
   const logo=$('business-logo');
-  if(b.logo_url){const img=document.createElement('img');img.src=`${b.logo_url}?v=${encodeURIComponent(b.updated_at||Date.now())}`;img.alt=`Logo de ${b.display_name}`;logo.textContent='';logo.appendChild(img)}
+  if(b.logo_url){const img=document.createElement('img');img.loading='eager';img.decoding='async';img.src=`${b.logo_url}?v=${encodeURIComponent(b.updated_at||Date.now())}`;img.alt=`Logo de ${b.display_name}`;logo.textContent='';logo.appendChild(img)}
   else {logo.textContent=(b.display_name||'N').trim().charAt(0).toUpperCase()||'N'}
   renderPublicBusinessInfo(b);applyCustomerModuleOrder(b);
   document.title=`${b.display_name} · Mi tarjeta`;
   document.documentElement.classList.remove('customer-loading');
 }
 async function loadPublicBranding(){try{
-  const r=await fetch(`/api/public/${slug}/branding?refresh=${Date.now()}`,{cache:'no-store'});
+  const r=await fetch(`/api/public/${slug}/branding`,{cache:'default'});
   if(!r.ok)throw Error(`branding_${r.status}`);
   hidePublicPageDisabled();
   const b=await r.json(),wasLoaded=!!publicBrandingFingerprint;
@@ -256,7 +261,7 @@ async function loadCustomerRaffles(){if(!customerModuleEnabled('raffles'))return
 // Corrección final: una sola implementación estable y el slug se normaliza para /negocio/.
 const customerPathSlug=location.pathname.replace(/\/+$/,'').split('/').pop();
 renderCustomerSchedule=function(b){const home=$('customer-home');if(!home)return;let box=$('customer-schedule');if(!box){box=document.createElement('section');box.id='customer-schedule';box.className='schedule-panel hidden';box.innerHTML='<button id="customer-schedule-toggle" type="button" class="schedule-toggle" aria-expanded="false">🕒 Horarios <span>＋</span></button><div id="customer-schedule-content" class="schedule-content hidden"></div>';home.insertBefore(box,$('customer-profile'));$('customer-schedule-toggle').onclick=()=>{const c=$('customer-schedule-content'),closed=c.classList.toggle('hidden');$('customer-schedule-toggle').setAttribute('aria-expanded',String(!closed));$('customer-schedule-toggle').querySelector('span').textContent=closed?'＋':'−'}}const rows=b.business_hours||[];const enabled=Boolean(b.show_business_hours&&rows.length);box.classList.toggle('hidden',!enabled);if(!enabled)return;const c=$('customer-schedule-content');c.innerHTML='<h3>Horario de atención</h3>'+rows.map(row=>`<div class="customer-hour-row"><span>${publicDayNames[row.weekday]}</span><b>${row.enabled?formatBusinessHour(row.opens_at)+' – '+formatBusinessHour(row.closes_at):'Cerrado'}</b></div>`).join('')};
-loadCustomerRaffles=async function(){if(!customerModuleEnabled('raffles'))return;try{const response=await fetch(`/api/public/${encodeURIComponent(customerPathSlug)}/raffles`,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);const rows=await response.json(),host=$('rewards');if(!host)return;let box=$('customer-raffles');if(!box){box=document.createElement('section');box.id='customer-raffles';box.className='hero-card';host.after(box)}box.innerHTML=rows.map(r=>`<div class="raffle-card">${r.image_url?`<img class="raffle-prize-image" src="${ES.escape(r.image_url)}" alt="Premio">`:''}<p class="eyebrow">🎟️ RIFA</p><h2>${ES.escape(r.name)}</h2><p>${ES.escape(r.description||'Participa en el sorteo.')}</p><p><b>${r.tickets_per_purchase||1}</b> boleta(s) por compra · ${r.ticket_count?'Disponibles: '+r.tickets_available:'Boletas ilimitadas'}</p><button type="button" onclick="participateCustomerRaffle(${r.id})">Participar</button></div>`).join('');box.classList.toggle('hidden',!rows.length)}catch(e){console.warn('Rifas:',e.message)}};
+loadCustomerRaffles=async function(){if(!customerModuleEnabled('raffles'))return;try{const response=await fetch(`/api/public/${encodeURIComponent(customerPathSlug)}/raffles`,{cache:'no-store'});if(!response.ok)throw Error('HTTP '+response.status);const rows=await response.json(),host=$('rewards');if(!host)return;let box=$('customer-raffles');if(!box){box=document.createElement('section');box.id='customer-raffles';box.className='hero-card';host.after(box)}box.innerHTML=rows.map(r=>`<div class="raffle-card">${r.image_url?`<img class="raffle-prize-image" src="${ES.escape(r.image_url)}" alt="Premio" loading="lazy" decoding="async">`:''}<p class="eyebrow">🎟️ RIFA</p><h2>${ES.escape(r.name)}</h2><p>${ES.escape(r.description||'Participa en el sorteo.')}</p><p><b>${r.tickets_per_purchase||1}</b> boleta(s) por compra · ${r.ticket_count?'Disponibles: '+r.tickets_available:'Boletas ilimitadas'}</p><button type="button" onclick="participateCustomerRaffle(${r.id})">Participar</button></div>`).join('');box.classList.toggle('hidden',!rows.length)}catch(e){console.warn('Rifas:',e.message)}};
 const _loadCustomerRafflesStable=loadCustomerRaffles;
 loadCustomerRaffles=async function(){if(window.__raffleInteractionActive||document.querySelector('#customer-raffles .raffle-operation-code, #customer-raffles .raffle-number-picker, #customer-raffles [data-buying-again="1"]'))return;return _loadCustomerRafflesStable()};
 $('public-hours')?.classList.add('hidden');
