@@ -1,1 +1,1 @@
-BUILD 084 - Control de rifas e historial
+BUILD 086 - Boletas visibles antes del sorteo

@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.84")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.86")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.84", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.86", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -4550,15 +4550,34 @@ def reject_raffle_ticket(ticket_id:int,user=Depends(require("super_admin","busin
         if not row: raise HTTPException(404,"Participación no encontrada")
         tenant_scope(user,row["tenant_id"]);require_user_module(con,user,"raffles");con.execute("DELETE FROM raffle_tickets WHERE id=? AND status='pending'",(ticket_id,));return {"status":"rejected","ticket_id":ticket_id}
 
+@app.get("/api/raffles/{raffle_id}/draw-candidates")
+def raffle_draw_candidates(raffle_id:int,user=Depends(require("super_admin","business_admin"))):
+    with connection() as con:
+        raffle=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
+        if not raffle: raise HTTPException(404,"Rifa no encontrada")
+        tenant_scope(user,raffle["tenant_id"]); require_user_module(con,user,"raffles")
+        if raffle["status"]=="drawn": raise HTTPException(409,"Esta rifa ya fue sorteada")
+        rows=con.execute("SELECT id,ticket_number,customer_name,status,created_at FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner') ORDER BY CAST(CASE WHEN ticket_number GLOB '[0-9]*' THEN ticket_number ELSE '0' END AS INTEGER),ticket_number,id",(raffle_id,)).fetchall()
+        entries=[{"id":x["id"],"ticket_number":x["ticket_number"],"customer_name":x["customer_name"],"status":x["status"],"created_at":x["created_at"]} for x in rows]
+        candidates=[x for x in entries if x["status"]=="reserved"]
+        return {"raffle_id":raffle_id,"raffle_name":raffle["name"],"entries":entries,"candidates":[x for x in candidates],"count":len(candidates)}
+
 @app.post("/api/raffles/{raffle_id}/draw")
-def draw_raffle(raffle_id:int,user=Depends(require("super_admin","business_admin"))):
+def draw_raffle(raffle_id:int,data:dict|None=None,user=Depends(require("super_admin","business_admin"))):
     with connection() as con:
         r=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
         if not r: raise HTTPException(404,"Rifa no encontrada")
-        require_user_module(con, user, "raffles")
+        tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
+        if r["status"]=="drawn": raise HTTPException(409,"Esta rifa ya fue sorteada")
         tickets=con.execute("SELECT * FROM raffle_tickets WHERE raffle_id=? AND status='reserved'",(raffle_id,)).fetchall()
-        if not tickets: raise HTTPException(422,"No hay boletas reservadas")
-        winner=tickets[secrets.randbelow(len(tickets))]; con.execute("UPDATE raffle_tickets SET status='winner' WHERE id=?",(winner['id'],)); con.execute("UPDATE raffles SET status='drawn',winner_ticket=?,winner_name=? WHERE id=?",(winner['ticket_number'],winner['customer_name'],raffle_id)); return {"raffle_id":raffle_id,"winner":row_dict(winner)}
+        if not tickets: raise HTTPException(422,"No hay boletas validadas para sortear")
+        requested=(data or {}).get("ticket_id")
+        winner=next((x for x in tickets if requested is not None and int(x["id"])==int(requested)),None) if requested is not None else tickets[secrets.randbelow(len(tickets))]
+        if not winner: raise HTTPException(409,"La boleta seleccionada ya no está habilitada para el sorteo")
+        changed=con.execute("UPDATE raffle_tickets SET status='winner' WHERE id=? AND status='reserved'",(winner["id"],))
+        if getattr(changed,"rowcount",1)==0: raise HTTPException(409,"La boleta ya cambió de estado. Actualiza la lista.")
+        con.execute("UPDATE raffles SET status='drawn',winner_ticket=?,winner_name=? WHERE id=?",(winner["ticket_number"],winner["customer_name"],raffle_id))
+        return {"raffle_id":raffle_id,"winner":row_dict(winner),"participants_count":len(tickets)}
 
 @app.get("/api/roulette")
 def list_roulette(tenant_id:int|None=None,user=Depends(require("super_admin","business_admin","branch_admin"))):
