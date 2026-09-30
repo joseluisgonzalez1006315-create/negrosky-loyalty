@@ -57,6 +57,14 @@ def row_dict(row):
     return dict(row) if row else None
 
 
+def db_datetime(value):
+    """Normalize SQLite text and PostgreSQL datetime values for comparisons."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def new_operation_code(con):
     for _ in range(20):
         code = f"{secrets.randbelow(1_000_000):06d}"
@@ -1203,7 +1211,7 @@ def support_reset(data: SupportResetInput):
         if not user:
             raise HTTPException(status_code=404, detail="Cuenta no encontrada")
         codes = con.execute("SELECT * FROM support_codes WHERE user_id=? AND used_at IS NULL ORDER BY id DESC", (user["id"],)).fetchall()
-        valid = next((item for item in codes if datetime.fromisoformat(item["expires_at"]) >= now and verify_password(data.code, item["code_hash"])), None)
+        valid = next((item for item in codes if db_datetime(item["expires_at"]) >= now and verify_password(data.code, item["code_hash"])), None)
         if not valid:
             raise HTTPException(status_code=400, detail="Código temporal incorrecto o vencido")
         con.execute("UPDATE users SET password_hash=?, force_password_change=0, failed_attempts=0, locked_until=NULL WHERE id=?", (hash_password(data.new_password), user["id"]))
@@ -2839,7 +2847,7 @@ def customer_raffle_operations(customer=Depends(current_customer)):
             ids=json.loads(token["ticket_ids_json"] or "[]")
             marks=','.join('?'*len(ids)) or 'NULL'
             tickets=con.execute(f"SELECT ticket_number FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
+            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if db_datetime(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
             result.append({"id":token["id"],"raffle_id":token["raffle_id"],"raffle_name":token["raffle_name"],"code":token["code"],"status":status_name,"ticket_numbers":[x["ticket_number"] for x in tickets],"created_at":token["created_at"],"validated_at":token["validated_at"],"seller_name":token["validated_by_name"]})
         return result
 
@@ -2978,7 +2986,7 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
                     result["mission_completed"] = card["progress"] == 0
                     result["reward_name"] = card["reward_name"]
             return result
-        if datetime.fromisoformat(token["expires_at"]) < now:
+        if db_datetime(token["expires_at"]) < now:
             return {"status": "expired", "operation": token["operation_type"]}
     return {"status": "pending", "operation": token["operation_type"]}
 
@@ -3016,7 +3024,7 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin", 
             raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
         if token["used_at"]:
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
-        if datetime.fromisoformat(token["expires_at"]) < now:
+        if db_datetime(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Este código venció. El cliente ya puede mostrar el nuevo código.")
         quantity = 1
         if token["operation_type"] == "reward_batch":
@@ -3047,7 +3055,7 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
         validation_branch = validation_branch_for(user, token)
-        if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
+        if token["used_at"] or db_datetime(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
         program = con.execute("SELECT * FROM loyalty_programs WHERE id=?", (token["program_id"],)).fetchone()
@@ -3146,7 +3154,7 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
         validation_branch = validation_branch_for(user, token)
-        if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
+        if token["used_at"] or db_datetime(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
             rewards = con.execute(
@@ -4348,7 +4356,7 @@ def raffle_operation_row(con, code, user):
         raise HTTPException(403,"Este QR pertenece a otra sucursal")
     if token["used_at"]: raise HTTPException(409,"Esta participación ya fue permitida")
     if token["rejected_at"]: raise HTTPException(409,"Esta participación ya fue rechazada")
-    if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
+    if db_datetime(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
     if user.get("role")!="super_admin":
         require_user_module(con,user,"raffles",user.get("branch_id"))
         require_worker_access(con, user, "validate_raffle")
