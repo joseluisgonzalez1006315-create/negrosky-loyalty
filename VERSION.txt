@@ -1,1 +1,1 @@
-BUILD 094 - Tarjeta de ganador compacta y ordenada
+BUILD 096 - Horarios simples, sesión persistente y negocio activo
