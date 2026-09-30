@@ -1,1 +1,1 @@
-BUILD 092 - Ganador grande, fotos comprimidas y migración cloud
+BUILD 093 - Tarjeta de ganador ordenada y adaptable
