@@ -3010,7 +3010,19 @@ def validation_branch_for(con, user, token):
     ).fetchone()
     if default_branch:
         return default_branch["id"]
-    raise HTTPException(status_code=422, detail="Crea al menos una sucursal activa para registrar la compra")
+    # Legacy businesses may have been created before branches were required.
+    # Create a neutral default branch so their existing QR flow keeps working.
+    con.execute(
+        "INSERT INTO branches (tenant_id, name, city, address, phone) VALUES (?, ?, ?, ?, ?)",
+        (user["tenant_id"], "Principal", None, None, None),
+    )
+    created_branch = con.execute(
+        "SELECT id FROM branches WHERE tenant_id=? AND name=? ORDER BY id DESC LIMIT 1",
+        (user["tenant_id"], "Principal"),
+    ).fetchone()
+    if created_branch:
+        return created_branch["id"]
+    raise HTTPException(status_code=422, detail="No se pudo crear la sucursal principal del negocio")
 
 
 @app.get("/api/operations/preview/{code}")
