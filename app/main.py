@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.89")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.90")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.89", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.90", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -2895,7 +2895,7 @@ def customer_raffles(customer=Depends(current_customer)):
     with connection() as con:
         if not module_enabled(con, customer["tenant_id"], "raffles", customer.get("origin_branch_id")):
             return []
-        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status='active' ORDER BY id DESC",(customer["tenant_id"],)).fetchall(); out=[]
+        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status IN ('active','drawn') ORDER BY id DESC",(customer["tenant_id"],)).fetchall(); out=[]
         for r in rows:
             mine=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND customer_phone=?",(r["id"],customer.get("phone"))).fetchone()["n"]
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
@@ -2960,7 +2960,7 @@ def public_raffles_by_slug(slug: str):
         if not tenant: raise HTTPException(404,"Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
         if not module_enabled(con, tenant["id"], "raffles"): return []
-        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status='active' ORDER BY id DESC",(tenant["id"],)).fetchall()
+        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status IN ('active','drawn') ORDER BY id DESC",(tenant["id"],)).fetchall()
         out=[]
         for r in rows:
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
@@ -4396,6 +4396,16 @@ def update_raffle(raffle_id:int,data:RaffleInput,user=Depends(require("super_adm
         if data.tenant_id != scope: raise HTTPException(403,"La rifa pertenece a otro negocio")
         require_user_module(con,user,"raffles")
         con.execute("UPDATE raffles SET name=?,description=?,image_url=?,ticket_price=?,ticket_count=?,draw_at=?,tickets_per_purchase=?,customer_ticket_limit=? WHERE id=?",(data.name,data.description,data.image_url,data.ticket_price,data.ticket_count,data.draw_at,data.tickets_per_purchase,data.customer_ticket_limit,raffle_id))
+        return row_dict(con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone())
+
+@app.put("/api/raffles/{raffle_id}/winner-photo")
+def update_raffle_winner_photo(raffle_id:int,data:dict,user=Depends(require("super_admin","business_admin"))):
+    with connection() as con:
+        r=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
+        if not r: raise HTTPException(404,"Rifa no encontrada")
+        tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
+        url=str((data or {}).get("winner_photo_url") or "").strip() or None
+        con.execute("UPDATE raffles SET winner_photo_url=? WHERE id=?",(url,raffle_id))
         return row_dict(con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone())
 
 @app.delete("/api/raffles/{raffle_id}")

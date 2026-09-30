@@ -823,6 +823,9 @@ def init_db() -> None:
                 con.execute(f"ALTER TABLE collaborations ADD COLUMN {name} {definition}")
         customer_columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
         raffle_columns = {row[1] for row in con.execute("PRAGMA table_info(raffles)")}
+        if "winner_photo_url" not in raffle_columns:
+            con.execute("ALTER TABLE raffles ADD COLUMN winner_photo_url TEXT")
+
         raffle_operation_columns = {row[1] for row in con.execute("PRAGMA table_info(raffle_operation_tokens)")}
         if "validated_by_name" not in raffle_operation_columns:
             con.execute("ALTER TABLE raffle_operation_tokens ADD COLUMN validated_by_name TEXT")
