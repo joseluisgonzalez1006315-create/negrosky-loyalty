@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.86")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.87")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.86", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.87", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -4515,8 +4515,15 @@ def search_raffle_tickets(q: str = "", tenant_id: int | None = None, user=Depend
     with connection() as con:
         scope=None if user["role"]=="super_admin" and tenant_id is None else tenant_scope(user,tenant_id)
         text=str(q or "").strip().upper()
-        sql="SELECT t.*,r.name raffle_name,r.tenant_id FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE (upper(t.ticket_number) LIKE ? OR upper(t.customer_name) LIKE ? OR t.customer_phone LIKE ?)"
-        args=[f"%{text}%",f"%{text}%",f"%{text}%"]
+        base="SELECT t.*,r.name raffle_name,r.tenant_id FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE "
+        if text.isdigit():
+            # Un número corto se interpreta como número de boleta exacto: 5 no devuelve 50 ni 500.
+            if len(text)>=8:
+                sql=base+"(upper(t.ticket_number)=? OR t.customer_phone=?)"; args=[text,text]
+            else:
+                sql=base+"upper(t.ticket_number)=?"; args=[text]
+        else:
+            sql=base+"(upper(t.ticket_number) LIKE ? OR upper(t.customer_name) LIKE ? OR t.customer_phone LIKE ?)"; args=[f"%{text}%",f"%{text}%",f"%{text}%"]
         if scope is not None: sql += " AND r.tenant_id=?"; args.append(scope)
         rows=con.execute(sql+" ORDER BY t.id DESC LIMIT 100",args).fetchall()
         return [row_dict(x) for x in rows]
@@ -4557,7 +4564,9 @@ def raffle_draw_candidates(raffle_id:int,user=Depends(require("super_admin","bus
         if not raffle: raise HTTPException(404,"Rifa no encontrada")
         tenant_scope(user,raffle["tenant_id"]); require_user_module(con,user,"raffles")
         if raffle["status"]=="drawn": raise HTTPException(409,"Esta rifa ya fue sorteada")
-        rows=con.execute("SELECT id,ticket_number,customer_name,status,created_at FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner') ORDER BY CAST(CASE WHEN ticket_number GLOB '[0-9]*' THEN ticket_number ELSE '0' END AS INTEGER),ticket_number,id",(raffle_id,)).fetchall()
+        # Evita operadores específicos de SQLite para que funcione igual en PostgreSQL/Render.
+        rows=con.execute("SELECT id,ticket_number,customer_name,status,created_at FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner') ORDER BY id",(raffle_id,)).fetchall()
+        rows=sorted(rows,key=lambda x:(0,int(x["ticket_number"])) if str(x["ticket_number"]).isdigit() else (1,str(x["ticket_number"])))
         entries=[{"id":x["id"],"ticket_number":x["ticket_number"],"customer_name":x["customer_name"],"status":x["status"],"created_at":x["created_at"]} for x in rows]
         candidates=[x for x in entries if x["status"]=="reserved"]
         return {"raffle_id":raffle_id,"raffle_name":raffle["name"],"entries":entries,"candidates":[x for x in candidates],"count":len(candidates)}
