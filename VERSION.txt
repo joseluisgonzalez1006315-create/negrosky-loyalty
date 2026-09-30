@@ -1,1 +1,1 @@
-BUILD 078 - Validación de números elegidos
+BUILD 080 - QR pendiente sin vencimiento

@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.78")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.80")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.78", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.80", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -2932,10 +2932,10 @@ def participate_raffle(raffle_id:int, data: dict | None = None, request: Request
         created=[];created_codes=[]
         for number in numbers:
             cur=con.execute("INSERT INTO raffle_tickets(raffle_id,ticket_number,customer_name,customer_phone,status) VALUES(?,?,?,?, 'pending')",(raffle_id,number,customer["name"],customer.get("phone"))); created.append(cur.lastrowid);created_codes.append(number)
-        expires=datetime.now(timezone.utc)+timedelta(seconds=300)
+        expires=datetime.now(timezone.utc)+timedelta(hours=24)
         code=new_operation_code(con)
         con.execute("INSERT INTO raffle_operation_tokens(tenant_id,customer_id,raffle_id,branch_id,code,ticket_ids_json,expires_at) VALUES(?,?,?,?,?,?,?)",(customer["tenant_id"],customer["id"],raffle_id,customer.get("origin_branch_id"),code,json.dumps(created),expires.isoformat()))
-        return {"raffle_id":raffle_id,"requested":qty,"status":"pending","message":"Participación pendiente. El negocio debe permitirla.","ticket_ids":created,"ticket_codes":created_codes,"code":code,"expires_in_seconds":300,"worker_url":worker_link(request,code) if request else None}
+        return {"raffle_id":raffle_id,"requested":qty,"status":"pending","message":"Participación pendiente. El negocio debe permitirla.","ticket_ids":created,"ticket_codes":created_codes,"code":code,"expires_in_seconds":86400,"worker_url":worker_link(request,code) if request else None}
 
 @app.get("/api/public/me/raffle-operations")
 def customer_raffle_operations(customer=Depends(current_customer)):
@@ -2948,7 +2948,7 @@ def customer_raffle_operations(customer=Depends(current_customer)):
             ids=json.loads(token["ticket_ids_json"] or "[]")
             marks=','.join('?'*len(ids)) or 'NULL'
             tickets=con.execute(f"SELECT ticket_number FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
+            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "pending"
             result.append({"id":token["id"],"raffle_id":token["raffle_id"],"raffle_name":token["raffle_name"],"code":token["code"],"status":status_name,"ticket_numbers":[x["ticket_number"] for x in tickets],"created_at":token["created_at"],"validated_at":token["validated_at"],"seller_name":token["validated_by_name"]})
         return result
 
@@ -4457,7 +4457,6 @@ def raffle_operation_row(con, code, user):
         raise HTTPException(403,"Este QR pertenece a otra sucursal")
     if token["used_at"]: raise HTTPException(409,"Esta participación ya fue permitida")
     if token["rejected_at"]: raise HTTPException(409,"Esta participación ya fue rechazada")
-    if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
     if user.get("role")!="super_admin":
         require_user_module(con,user,"raffles",user.get("branch_id"))
         require_worker_access(con, user, "validate_raffle")
