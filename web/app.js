@@ -544,3 +544,6 @@ setTimeout(()=>{const modal=document.getElementById('onboarding-modal');if(!moda
 // Las lecturas automáticas usan una ventana de caché más amplia; las acciones
 // POST/PUT/DELETE siguen pasando siempre y actualizan los datos al guardar.
 (function(){const originalApi=api,cache=new Map();api=async function(path,o={}){if(o.method&&o.method!=='GET')return originalApi(path,o);const key=path,now=Date.now(),hit=cache.get(key);if(hit&&now-hit.time<10000)return hit.promise;const promise=originalApi(path,o).catch(e=>{cache.delete(key);throw e});cache.set(key,{time:now,promise});return promise}})();
+
+// BUILD 068 visible
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 068 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 068';

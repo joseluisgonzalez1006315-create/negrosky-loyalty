@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.68")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.68", "build": "068", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3726,25 +3726,18 @@ def notification_stream(after_id: int | None = None,
                         user=Depends(require("super_admin", "business_admin", "branch_admin"))):
     with connection() as con:
         require_user_module(con, user, "notifications")
-    query = """SELECT n.id,n.title,n.message,n.event_type,n.image_url,t.name business_name
-        FROM notifications n JOIN tenants t ON t.id=n.tenant_id WHERE 1=1"""
+    from_sql = "FROM notifications n JOIN tenants t ON t.id=n.tenant_id"
+    filters = " WHERE 1=1"
     params = []
     if user["role"] != "super_admin":
-        query += " AND n.tenant_id=?"
-        params.append(user["tenant_id"])
+        filters += " AND n.tenant_id=?"; params.append(user["tenant_id"])
     if user["role"] == "branch_admin":
-        query += " AND n.branch_id=?"
-        params.append(user["branch_id"])
+        filters += " AND n.branch_id=?"; params.append(user["branch_id"])
+    query = "SELECT n.id,n.title,n.message,n.event_type,n.image_url,t.name business_name " + from_sql + filters
     with connection() as con:
         if after_id is None:
-            latest = con.execute(
-                query.replace(
-                    "SELECT n.id,n.title,n.message,n.event_type,t.name business_name",
-                    "SELECT MAX(n.id) latest",
-                ),
-                params,
-            ).fetchone()["latest"] or 0
-            return {"last_id": latest, "items": []}
+            row = con.execute("SELECT COALESCE(MAX(n.id),0) AS latest " + from_sql + filters, params).fetchone()
+            return {"last_id": int(row[0] or 0), "items": []}
         rows = con.execute(query + " AND n.id>? ORDER BY n.id LIMIT 30", (*params, max(0, after_id))).fetchall()
     return {"last_id": rows[-1]["id"] if rows else after_id, "items": [row_dict(row) for row in rows]}
 
