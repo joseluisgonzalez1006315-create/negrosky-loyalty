@@ -1,1 +1,1 @@
-BUILD 090 - Ganador visible y foto de entrega
+BUILD 091 - Ganador grande y fotos desde el dispositivo

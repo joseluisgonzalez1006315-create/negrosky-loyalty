@@ -223,3 +223,10 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 .customer-loading-card{min-height:120px;padding:22px;border-radius:20px;background:linear-gradient(110deg,var(--card,#171626) 8%,#252238 18%,var(--card,#171626) 33%);background-size:220% 100%;animation:customer-skeleton 1.15s linear infinite;display:grid;align-content:center;gap:10px}.customer-loading-card span{display:block;height:12px;border-radius:8px;background:#ffffff20}.customer-loading-card span:first-child{width:48%;height:18px}.customer-loading-card span:last-child{width:72%}@keyframes customer-skeleton{to{background-position:-220% 0}}
 
 .customer-profile-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}.customer-profile-actions button{flex:1 1 150px}.customer-profile-editor{margin-top:1rem;padding-top:1rem;border-top:1px solid rgba(255,255,255,.12)}
+
+#customer-raffles .raffle-card-drawn{border-color:#86efac;background:linear-gradient(135deg,#17112d,#10261d);}
+#customer-raffles .raffle-winner-prominent{margin-top:18px;padding:20px;text-align:center;gap:10px;box-shadow:0 10px 35px #0005}
+#customer-raffles .raffle-winner-prominent b{font-size:clamp(18px,4vw,25px);letter-spacing:.04em}
+#customer-raffles .raffle-winning-number{display:block;font-size:clamp(52px,16vw,96px);line-height:1;font-weight:950;color:#fde047;text-shadow:0 0 24px #f59e0b99;font-variant-numeric:tabular-nums}
+#customer-raffles .raffle-winning-name{font-size:clamp(18px,4vw,28px);font-weight:800}
+#customer-raffles .raffle-winner-prominent img{max-height:320px;object-fit:cover}

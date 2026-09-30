@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.90")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.91")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.90", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.91", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -4405,6 +4405,11 @@ def update_raffle_winner_photo(raffle_id:int,data:dict,user=Depends(require("sup
         if not r: raise HTTPException(404,"Rifa no encontrada")
         tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
         url=str((data or {}).get("winner_photo_url") or "").strip() or None
+        if url and url.startswith("data:"):
+            if not re.fullmatch(r"data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+", url) or len(url) > 2_400_000:
+                raise HTTPException(413, "La foto debe ser JPG, PNG o WebP y pesar máximo 2 MB")
+        elif url and not re.match(r"^https?://", url, re.I):
+            raise HTTPException(422, "La foto debe ser una imagen cargada o una URL pública https")
         con.execute("UPDATE raffles SET winner_photo_url=? WHERE id=?",(url,raffle_id))
         return row_dict(con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone())
 
