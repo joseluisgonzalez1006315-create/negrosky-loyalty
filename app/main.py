@@ -2807,6 +2807,34 @@ def public_service_status(slug: str, branch_id: int | None = None):
         return service_status(con, tenant["id"], branch_id)
 
 
+@app.get("/api/public/me/bootstrap")
+def customer_bootstrap(customer=Depends(current_customer)):
+    """Carga inicial unificada: tema, permisos, tarjetas y premios en una sola conexión."""
+    with connection() as con:
+        tenant_id=customer["tenant_id"]; branch_id=customer.get("origin_branch_id")
+        require_public_module(con, tenant_id, "public_page", branch_id)
+        branding=branding_payload(con, tenant_id)
+        loyalty_on=module_enabled(con, tenant_id, "loyalty", branch_id)
+        cards=[]; rewards=[]
+        if loyalty_on:
+            rows=con.execute("""SELECT c.id,c.progress,c.cycle,p.id AS program_id,p.name AS program_name,
+                p.target_purchases,p.reward_name,p.progress_emoji,p.reward_stock,p.reward_display,
+                p.title_mode,p.stamps_mode,p.progress_mode,p.reward_mode,p.button_mode,
+                EXISTS(SELECT 1 FROM program_icons pi WHERE pi.program_id=p.id) AS has_custom_icon,
+                CASE WHEN p.reward_stock IS NULL THEN NULL ELSE GREATEST(p.reward_stock-(SELECT COUNT(*) FROM rewards r WHERE r.program_id=p.id),0) END AS rewards_remaining
+                FROM loyalty_cards c JOIN loyalty_programs p ON p.id=c.program_id
+                WHERE c.customer_id=? AND p.status='active' ORDER BY p.id""",(customer["id"],)).fetchall()
+            defaults=branding
+            for row in rows:
+                item=row_dict(row); item["icon_url"]=f"/api/public/loyalty-programs/{item['program_id']}/icon" if item.pop("has_custom_icon") else None
+                for part in ("title","stamps","progress","reward","button"):
+                    mode=item.pop(f"{part}_mode"); item[f"show_{part}"]=mode=="show" or (mode=="inherit" and defaults[f"show_campaign_{part}"])
+                cards.append(item)
+            rewards=[row_dict(r) for r in con.execute("""SELECT r.id,r.program_id,r.name,r.status,r.unlocked_at,r.claimed_at,p.name AS program_name
+                FROM rewards r JOIN loyalty_programs p ON p.id=r.program_id WHERE r.customer_id=? ORDER BY r.id DESC""",(customer["id"],)).fetchall()]
+        branding["enabled_modules"]=effective_modules(con,tenant_id,branch_id)
+    return {"branding":branding,"customer":customer,"cards":cards,"rewards":rewards,"enabled_modules":branding["enabled_modules"]}
+
 @app.get("/api/public/me/cards")
 def customer_cards(customer=Depends(current_customer)):
     with connection() as con:
