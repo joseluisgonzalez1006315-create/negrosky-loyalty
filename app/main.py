@@ -2991,13 +2991,26 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
     return {"status": "pending", "operation": token["operation_type"]}
 
 
-def validation_branch_for(user, token):
+def validation_branch_for(con, user, token):
     """Resolve the branch for an operation without forcing business owners to have one."""
     user_branch = user.get("branch_id")
     token_branch = token["branch_id"]
     if user_branch is not None and token_branch is not None and user_branch != token_branch:
         raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
-    return user_branch if user_branch is not None else token_branch
+    if user_branch is not None:
+        return user_branch
+    if token_branch is not None:
+        return token_branch
+    # purchases.branch_id is required in the existing schema. When the
+    # business account and the customer QR are both general, use the first
+    # active branch as the operation's accounting branch.
+    default_branch = con.execute(
+        "SELECT id FROM branches WHERE tenant_id=? AND status='active' ORDER BY id LIMIT 1",
+        (user["tenant_id"],),
+    ).fetchone()
+    if default_branch:
+        return default_branch["id"]
+    raise HTTPException(status_code=422, detail="Crea al menos una sucursal activa para registrar la compra")
 
 
 @app.get("/api/operations/preview/{code}")
@@ -3054,7 +3067,7 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type='purchase'", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        validation_branch = validation_branch_for(user, token)
+        validation_branch = validation_branch_for(con, user, token)
         if token["used_at"] or db_datetime(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
@@ -3153,7 +3166,7 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type IN ('reward','reward_batch')", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        validation_branch = validation_branch_for(user, token)
+        validation_branch = validation_branch_for(con, user, token)
         if token["used_at"] or db_datetime(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
