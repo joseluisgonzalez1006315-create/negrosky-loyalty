@@ -94,7 +94,7 @@ function applyPublicBranding(b){
   document.documentElement.style.setProperty('--brand-logo-size',(b.logo_size??64)+'px');
   document.documentElement.style.setProperty('--brand-logo-opacity',(b.logo_opacity??100)/100);
   document.documentElement.style.setProperty('--brand-logo-background',b.logo_background_color||'#ffffff');
-  document.body.classList.add('brand-customer');document.documentElement.classList.add('customer-ready');document.body.classList.toggle('social-floating',b.social_layout==='floating');document.body.dataset.socialDisplay=b.social_display_mode||'both';document.body.dataset.socialSize=b.social_size||'medium';document.body.dataset.socialPosition=b.social_position||'bottom-right';document.body.classList.toggle('social-hide-mobile',b.show_social_mobile===false);document.body.classList.toggle('social-hide-desktop',b.show_social_desktop===false);
+  document.body.classList.add('brand-customer');showCustomerLoadingShell();document.documentElement.classList.add('customer-ready');document.body.classList.toggle('social-floating',b.social_layout==='floating');document.body.dataset.socialDisplay=b.social_display_mode||'both';document.body.dataset.socialSize=b.social_size||'medium';document.body.dataset.socialPosition=b.social_position||'bottom-right';document.body.classList.toggle('social-hide-mobile',b.show_social_mobile===false);document.body.classList.toggle('social-hide-desktop',b.show_social_desktop===false);
   document.body.classList.toggle('brand-light',b.background_style==='light');
   document.body.classList.remove('brand-card-soft','brand-card-solid','brand-card-glass');
   document.body.classList.add(`brand-card-${b.card_style}`);
@@ -108,6 +108,19 @@ function applyPublicBranding(b){
   renderPublicBusinessInfo(b);applyCustomerModuleOrder(b);
   document.title=`${b.display_name} · Mi tarjeta`;
   document.documentElement.classList.remove('customer-loading');
+}
+function showCustomerLoadingShell(){
+  if(!token)return;
+  const home=$('customer-home');
+  if(!home)return;
+  $('identify-box')?.classList.add('hidden');
+  home.classList.remove('hidden');
+  const hello=$('hello');
+  if(hello&&!hello.textContent)hello.textContent='Cargando tu información…';
+  const cards=$('cards');
+  if(cards&&!cards.children.length)cards.innerHTML='<div class="customer-loading-card" aria-busy="true"><span></span><span></span><span></span></div>';
+  const rewards=$('rewards');
+  if(rewards&&!rewards.children.length)rewards.innerHTML='<div class="customer-loading-card" aria-busy="true"><span></span><span></span></div>';
 }
 async function loadPublicBranding(){try{
   const r=await fetch(`/api/public/${slug}/branding`,{cache:'default'});
