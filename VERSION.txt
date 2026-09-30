@@ -1,1 +1,1 @@
-BUILD 081 - QR pendiente clicable y nuevo intento
+BUILD 082 - Reintento de rifa tras rechazo
