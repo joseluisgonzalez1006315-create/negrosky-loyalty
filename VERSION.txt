@@ -1,1 +1,1 @@
-BUILD 076 - QR persistente y restaurable
+BUILD 077 - Rifas ilimitadas con números elegidos
