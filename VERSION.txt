@@ -1,1 +1,1 @@
-BUILD 080 - QR pendiente sin vencimiento
+BUILD 081 - QR pendiente clicable y nuevo intento
