@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .database import connection, database_path, init_db, INTEGRITY_ERRORS, using_postgres
 from .schemas import (
@@ -44,25 +45,22 @@ ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
 app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 @app.middleware("http")
 async def no_browser_cache(request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    if "cache-control" not in response.headers:
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
+        else:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
     return response
 
 
 def row_dict(row):
     return dict(row) if row else None
-
-
-def db_datetime(value):
-    """Normalize SQLite text and PostgreSQL datetime values for comparisons."""
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def new_operation_code(con):
@@ -453,11 +451,26 @@ def bootstrap_admin():
             )
 
 
+def ensure_general_business_purchases():
+    """Permite compras sin sucursal para negocios generales.
+
+    Las sucursales siguen siendo obligatorias cuando el QR pertenece a una
+    sucursal concreta, pero un negocio general guarda branch_id como NULL.
+    """
+    if not using_postgres():
+        return
+    with connection() as con:
+        # La migración es idempotente y funciona para la base local restaurada
+        # y para Supabase/PostgreSQL.
+        con.execute("ALTER TABLE purchases ALTER COLUMN branch_id DROP NOT NULL")
+
+
 @app.on_event("startup")
 def startup():
     global _maintenance_task
     init_db()
     sync_module_defaults()
+    ensure_general_business_purchases()
     bootstrap_admin()
     # Se ejecuta una vez al iniciar y luego cada 24 horas. Si el proceso se
     # reinicia, vuelve a comprobar la copia del día sin crear otra histórica.
@@ -926,7 +939,6 @@ def customer_manifest(slug: str):
 
 @app.get("/b/{slug}", include_in_schema=False)
 def customer_page(slug: str):
-    # Entregar el shell inmediatamente. La validación real ocurre en /branding.
     return FileResponse(WEB / "customer.html", headers={"Cache-Control": "public, max-age=60, stale-while-revalidate=300"})
 
 @app.get("/cliente", include_in_schema=False)
@@ -961,17 +973,11 @@ def permanent_business_qr(public_key: str, branch: int | None = None):
     init_db()
     with connection() as con:
         tenant = con.execute("SELECT id,slug FROM tenants WHERE public_key=? AND status='active' AND deleted_at IS NULL", (public_key,)).fetchone()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Código del negocio no encontrado")
-    with connection() as con:
+        if not tenant: raise HTTPException(status_code=404, detail="Código del negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
-    target = f"/b/{tenant['slug']}"
-    if branch is not None:
-        with connection() as con:
-            branch_row = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch, tenant["id"])).fetchone()
-        if not branch_row:
+        if branch is not None and not con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch, tenant["id"])).fetchone():
             raise HTTPException(status_code=404, detail="Sucursal no encontrada")
-        target += f"?branch={branch}"
+    target=f"/b/{tenant['slug']}" + (f"?branch={branch}" if branch is not None else "")
     return RedirectResponse(url=target, status_code=307)
 
 
@@ -1022,9 +1028,8 @@ def public_business_qr(slug: str, request: Request, branch_id: int | None = None
     target = f"{public_base_url(request, host)}/q/{tenant['public_key']}"
     if branch_id is not None:
         with connection() as con:
-            branch_row = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch_id, tenant["id"])).fetchone()
-        if not branch_row:
-            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+            if not con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch_id, tenant["id"])).fetchone():
+                raise HTTPException(status_code=404, detail="Sucursal no encontrada")
         target += f"?branch={branch_id}"
     output = io.BytesIO(); qrcode.make(target).save(output, format="PNG"); output.seek(0)
     return StreamingResponse(output, media_type="image/png", headers={"Cache-Control": "no-store", "X-QR-Target": target})
@@ -1032,19 +1037,20 @@ def public_business_qr(slug: str, request: Request, branch_id: int | None = None
 
 def public_base_url(request: Request, host: str | None = None) -> str:
     configured = (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
-    if configured:
-        return configured
-    host = host or request.url.hostname or "127.0.0.1"
-    if host.endswith(".onrender.com"):
-        return f"https://{host}"
-    port = request.url.port
-    if port is None or (request.url.scheme == "https" and port == 443) or (request.url.scheme == "http" and port == 80):
-        return f"{request.url.scheme}://{host}"
-    return f"{request.url.scheme}://{host}:{port}"
+    if configured: return configured
+    forwarded_host = request.headers.get("x-forwarded-host")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    host = (host or forwarded_host or request.url.hostname or "127.0.0.1").split(",", 1)[0].strip()
+    scheme = (forwarded_proto or request.url.scheme or "http").split(",", 1)[0].strip()
+    if host not in {"localhost", "127.0.0.1", "0.0.0.0"}: return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{request.url.port or 8030}"
+
+def _public_origin(request: Request) -> str:
+    return public_base_url(request)
 
 
 def worker_link(request: Request, code: str) -> str:
-    """Use a reachable local address for a QR generated from a PC localhost tab."""
+    """Use the public host without leaking the local :8030 port."""
     host = request.url.hostname or "127.0.0.1"
     if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
         try:
@@ -1211,7 +1217,7 @@ def support_reset(data: SupportResetInput):
         if not user:
             raise HTTPException(status_code=404, detail="Cuenta no encontrada")
         codes = con.execute("SELECT * FROM support_codes WHERE user_id=? AND used_at IS NULL ORDER BY id DESC", (user["id"],)).fetchall()
-        valid = next((item for item in codes if db_datetime(item["expires_at"]) >= now and verify_password(data.code, item["code_hash"])), None)
+        valid = next((item for item in codes if datetime.fromisoformat(item["expires_at"]) >= now and verify_password(data.code, item["code_hash"])), None)
         if not valid:
             raise HTTPException(status_code=400, detail="Código temporal incorrecto o vencido")
         con.execute("UPDATE users SET password_hash=?, force_password_change=0, failed_attempts=0, locked_until=NULL WHERE id=?", (hash_password(data.new_password), user["id"]))
@@ -2433,7 +2439,7 @@ def customer_profile(customer_id: int,
             """SELECT p.id, p.created_at, lp.name AS program_name, b.name AS branch_name,
             u.name AS worker_name FROM purchases p
             JOIN loyalty_programs lp ON lp.id=p.program_id
-            JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id
+            LEFT JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id
             WHERE p.customer_id=? ORDER BY p.id DESC LIMIT 100""",
             (customer_id,),
         ).fetchall()
@@ -2847,7 +2853,7 @@ def customer_raffle_operations(customer=Depends(current_customer)):
             ids=json.loads(token["ticket_ids_json"] or "[]")
             marks=','.join('?'*len(ids)) or 'NULL'
             tickets=con.execute(f"SELECT ticket_number FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if db_datetime(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
+            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
             result.append({"id":token["id"],"raffle_id":token["raffle_id"],"raffle_name":token["raffle_name"],"code":token["code"],"status":status_name,"ticket_numbers":[x["ticket_number"] for x in tickets],"created_at":token["created_at"],"validated_at":token["validated_at"],"seller_name":token["validated_by_name"]})
         return result
 
@@ -2955,7 +2961,7 @@ def create_purchase_token(data: OperationTokenInput, request: Request, customer=
 def business_history(tenant_id: int | None = None, user=Depends(require("super_admin", "business_admin", "branch_admin"))):
     scope=tenant_scope(user,tenant_id)
     with connection() as con:
-        p=con.execute("SELECT p.created_at,c.name customer_name,lp.name program_name,b.name branch_name,u.name worker_name FROM purchases p JOIN customers c ON c.id=p.customer_id JOIN loyalty_programs lp ON lp.id=p.program_id JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id WHERE p.tenant_id=? ORDER BY p.id DESC LIMIT 200",(scope,)).fetchall()
+        p=con.execute("SELECT p.created_at,c.name customer_name,lp.name program_name,b.name branch_name,u.name worker_name FROM purchases p JOIN customers c ON c.id=p.customer_id JOIN loyalty_programs lp ON lp.id=p.program_id LEFT JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id WHERE p.tenant_id=? ORDER BY p.id DESC LIMIT 200",(scope,)).fetchall()
         r=con.execute("SELECT r.claimed_at,c.name customer_name,r.name reward_name,b.name branch_name,u.name worker_name FROM rewards r JOIN customers c ON c.id=r.customer_id LEFT JOIN branches b ON b.id=r.branch_id LEFT JOIN users u ON u.id=r.worker_id WHERE r.tenant_id=? AND r.status='used' ORDER BY r.id DESC LIMIT 200",(scope,)).fetchall()
     return {"purchases":[row_dict(x) for x in p],"rewards":[row_dict(x) for x in r]}
 
@@ -2986,53 +2992,20 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
                     result["mission_completed"] = card["progress"] == 0
                     result["reward_name"] = card["reward_name"]
             return result
-        if db_datetime(token["expires_at"]) < now:
+        if datetime.fromisoformat(token["expires_at"]) < now:
             return {"status": "expired", "operation": token["operation_type"]}
     return {"status": "pending", "operation": token["operation_type"]}
 
 
-def validation_branch_for(con, user, token):
-    """Resolve the branch for an operation without forcing business owners to have one."""
-    user_branch = user.get("branch_id")
-    token_branch = token["branch_id"]
-    if user_branch is not None and token_branch is not None and user_branch != token_branch:
-        raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
-    if user_branch is not None:
-        return user_branch
-    if token_branch is not None:
-        return token_branch
-    # purchases.branch_id is required in the existing schema. When the
-    # business account and the customer QR are both general, use the first
-    # active branch as the operation's accounting branch.
-    default_branch = con.execute(
-        "SELECT id FROM branches WHERE tenant_id=? AND status='active' ORDER BY id LIMIT 1",
-        (user["tenant_id"],),
-    ).fetchone()
-    if default_branch:
-        return default_branch["id"]
-    # Legacy businesses may have been created before branches were required.
-    # Create a neutral default branch so their existing QR flow keeps working.
-    con.execute(
-        "INSERT INTO branches (tenant_id, name, city, address, phone) VALUES (?, ?, ?, ?, ?)",
-        (user["tenant_id"], "Principal", None, None, None),
-    )
-    created_branch = con.execute(
-        "SELECT id FROM branches WHERE tenant_id=? AND name=? ORDER BY id DESC LIMIT 1",
-        (user["tenant_id"], "Principal"),
-    ).fetchone()
-    if created_branch:
-        return created_branch["id"]
-    raise HTTPException(status_code=422, detail="No se pudo crear la sucursal principal del negocio")
-
-
 @app.get("/api/operations/preview/{code}")
-def preview_operation(code: str, user=Depends(require("worker", "branch_admin", "business_admin"))):
+def preview_operation(code: str, user=Depends(require("business_admin", "worker", "branch_admin"))):
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=422, detail="El código debe tener seis números")
     now = datetime.now(timezone.utc)
+    branch_id = user.get("branch_id")
     with connection() as con:
-        require_service_open(con, user["tenant_id"], user.get("branch_id"))
-        require_user_module(con, user, "loyalty", user.get("branch_id"))
+        require_service_open(con, user["tenant_id"], branch_id)
+        require_user_module(con, user, "loyalty", branch_id)
         require_worker_access(con, user, "validate_purchase")
         token = con.execute(
             """SELECT ot.*, c.name AS customer_name, c.phone AS customer_phone,
@@ -3045,11 +3018,11 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin", 
         ).fetchone()
         if not token:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if user.get("branch_id") is not None and token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
+        if token["branch_id"] is not None and token["branch_id"] != branch_id:
             raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
         if token["used_at"]:
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
-        if db_datetime(token["expires_at"]) < now:
+        if datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Este código venció. El cliente ya puede mostrar el nuevo código.")
         quantity = 1
         if token["operation_type"] == "reward_batch":
@@ -3069,18 +3042,22 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin", 
 
 
 @app.post("/api/operations/validate-purchase")
-def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin", "business_admin"))):
+def validate_purchase(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
+    # Un negocio general puede validar sin sucursal. Si el código pertenece
+    # a una sucursal concreta, la comprobación posterior exige coincidencia.
+    branch_id = user.get("branch_id")
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
-        require_service_open(con, user["tenant_id"], user.get("branch_id"))
-        require_user_module(con, user, "loyalty", user.get("branch_id"))
+        require_service_open(con, user["tenant_id"], branch_id)
+        require_user_module(con, user, "loyalty", branch_id)
         require_worker_access(con, user, "validate_purchase")
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type='purchase'", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        validation_branch = validation_branch_for(con, user, token)
-        if token["used_at"] or db_datetime(token["expires_at"]) < now:
+        if token["branch_id"] is not None and token["branch_id"] != branch_id:
+            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
         program = con.execute("SELECT * FROM loyalty_programs WHERE id=?", (token["program_id"],)).fetchone()
@@ -3106,12 +3083,12 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker
             """INSERT INTO purchases
             (tenant_id, branch_id, customer_id, program_id, worker_id, operation_token_id)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (token["tenant_id"], validation_branch, token["customer_id"], token["program_id"], user["id"], token["id"]),
+            (token["tenant_id"], branch_id, token["customer_id"], token["program_id"], user["id"], token["id"]),
         )
         audit(con, user, "validate", "purchase", cur.lastrowid, {"customer_id": token["customer_id"]})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], validation_branch, token["customer_id"], "purchase",
+            con, token["tenant_id"], branch_id, token["customer_id"], "purchase",
             "Nueva compra validada",
             f"{user['name']} registró una compra de {customer_row['name']} en {program['name']}.",
         )
@@ -3168,18 +3145,21 @@ def create_reward_batch_token(data: RewardBatchInput, request: Request, customer
 
 
 @app.post("/api/operations/validate-reward")
-def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin", "business_admin"))):
+def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
+    if not user["branch_id"]:
+        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
-        require_service_open(con, user["tenant_id"], user.get("branch_id"))
-        require_user_module(con, user, "loyalty", user.get("branch_id"))
+        require_service_open(con, user["tenant_id"], user["branch_id"])
+        require_user_module(con, user, "loyalty", user["branch_id"])
         require_worker_access(con, user, "validate_reward")
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type IN ('reward','reward_batch')", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        validation_branch = validation_branch_for(con, user, token)
-        if token["used_at"] or db_datetime(token["expires_at"]) < now:
+        if token["branch_id"] is not None and token["branch_id"] != branch_id:
+            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
             rewards = con.execute(
@@ -3197,13 +3177,13 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
             rewards = [reward]
         con.executemany(
             "UPDATE rewards SET status='used', claimed_at=?, branch_id=?, worker_id=? WHERE id=?",
-            [(now.isoformat(), validation_branch, user["id"], reward["id"]) for reward in rewards],
+            [(now.isoformat(), user["branch_id"], user["id"], reward["id"]) for reward in rewards],
         )
         con.execute("UPDATE operation_tokens SET used_at=? WHERE id=?", (now.isoformat(), token["id"]))
         audit(con, user, "validate", "reward", rewards[0]["id"], {"customer_id": rewards[0]["customer_id"], "quantity": len(rewards)})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], validation_branch, token["customer_id"], "reward",
+            con, token["tenant_id"], branch_id, token["customer_id"], "reward",
             "Premio entregado",
             f"{user['name']} entregó {len(rewards)} premio(s) a {customer_row['name']}: {rewards[0]['name']}.",
         )
@@ -4381,7 +4361,7 @@ def raffle_operation_row(con, code, user):
         raise HTTPException(403,"Este QR pertenece a otra sucursal")
     if token["used_at"]: raise HTTPException(409,"Esta participación ya fue permitida")
     if token["rejected_at"]: raise HTTPException(409,"Esta participación ya fue rechazada")
-    if db_datetime(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
+    if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
     if user.get("role")!="super_admin":
         require_user_module(con,user,"raffles",user.get("branch_id"))
         require_worker_access(con, user, "validate_raffle")
