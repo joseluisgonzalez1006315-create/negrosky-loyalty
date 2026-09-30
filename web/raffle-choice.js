@@ -20,3 +20,8 @@
   document.addEventListener('click',e=>{if(!e.target.closest('.raffle-buy-again'))return;const card=e.target.closest('.raffle-card');if(!card)return;let tries=0;const retry=()=>{if(card.querySelector('.raffle-number-picker'))return;card.dataset.choiceReady='';enhance();if(++tries<12)setTimeout(retry,150)};setTimeout(retry,120)});
   new MutationObserver(enhance).observe(document.body,{childList:true,subtree:true});setTimeout(enhance,500);setInterval(enhance,1500);setInterval(syncLatestOperationCards,500);setInterval(showVerificationAlerts,300);setInterval(refreshOperations,4000);refreshOperations();
 })();
+// Reintentos seguros: solo carga rifas si la sección todavía está vacía.
+(function retryRaffleModule(){
+  const refresh=()=>{if(document.hidden)return;try{const host=document.getElementById('customer-raffles');const hasCards=Boolean(host?.querySelector('.raffle-card'));const hasOperation=Boolean(host?.querySelector('.raffle-operation-code'));if(!hasCards&&!hasOperation&&typeof window.loadCustomerRaffles==='function')window.loadCustomerRaffles()}catch(e){}};
+  [700,2000,5000].forEach(ms=>setTimeout(refresh,ms));
+})();

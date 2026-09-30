@@ -1,1 +1,1 @@
-BUILD 072 - cache critico de rifas actualizado
+BUILD 074 - QR pendiente persistente
