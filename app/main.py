@@ -2987,8 +2987,6 @@ def validation_branch_for(user, token):
     """Resolve the branch for an operation without forcing business owners to have one."""
     user_branch = user.get("branch_id")
     token_branch = token["branch_id"]
-    if user.get("role") in {"worker", "branch_admin"} and user_branch is None:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
     if user_branch is not None and token_branch is not None and user_branch != token_branch:
         raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
     return user_branch if user_branch is not None else token_branch
