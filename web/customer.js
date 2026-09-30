@@ -163,7 +163,14 @@ async function purchase(id){armSound();const renew=()=>api('/api/public/me/purch
 async function rewardBatch(programId,quantity){armSound();const renew=()=>api('/api/public/me/rewards/batch-token',{method:'POST',body:JSON.stringify({program_id:programId,quantity})});try{await displayQr(await renew(),renew)}catch(e){operationError(e.message)}}
 // Mantiene abierta la vista del cliente sincronizada cuando el negocio guarda cambios desde el panel.
 setTimeout(loadPublicBranding,30000);
-loadPublicBranding().then(async()=>{if(!token)await identifyFromDirectory();if(token)return showHome()}).catch(error=>{console.warn('No se pudo iniciar la vista del cliente',error);if(token){document.documentElement.classList.add('customer-session');document.documentElement.classList.add('customer-ready');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.remove('hidden');const notice=$('customer-error');if(notice)notice.textContent='La conexión está tardando. Pulsa recargar para intentarlo de nuevo.'}else{$('identify-box')?.classList.remove('hidden');$('customer-home')?.classList.add('hidden')}});
+(async()=>{
+  // Para clientes con sesión, pedir los datos mientras se aplica el tema.
+  // Reduce el tiempo percibido en Render sin mostrar contenido sin personalizar.
+  const homePromise=token?showHome():null;
+  await loadPublicBranding();
+  if(!token)await identifyFromDirectory();
+  if(homePromise)return homePromise;
+})().catch(error=>{console.warn('No se pudo iniciar la vista del cliente',error);if(token){document.documentElement.classList.add('customer-session');document.documentElement.classList.add('customer-ready');$('identify-box')?.classList.add('hidden');$('customer-home')?.classList.remove('hidden');const notice=$('customer-error');if(notice)notice.textContent='La conexión está tardando. Pulsa recargar para intentarlo de nuevo.'}else{$('identify-box')?.classList.remove('hidden');$('customer-home')?.classList.add('hidden')}});
 
 let serviceOpen=true;
 function renderCustomerServiceState(open,message){const content=$('customer-schedule-content');if(!content)return;let state=$('customer-service-state');if(!state){state=document.createElement('div');state.id='customer-service-state';content.prepend(state)}state.className=open?'service-state open':'service-state closed';state.innerHTML=open?'🟢 <b>En servicio</b>':`🔴 <b>Fuera de servicio</b><p>${ES.escape(message||'En este momento el negocio está cerrado.')}</p>`}
