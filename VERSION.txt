@@ -1,1 +1,1 @@
-BUILD 075 - QR inmediato al participar
+BUILD 076 - QR persistente y restaurable
