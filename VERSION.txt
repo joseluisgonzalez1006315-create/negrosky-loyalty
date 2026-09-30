@@ -1,1 +1,1 @@
-BUILD 093 - Tarjeta de ganador ordenada y adaptable
+BUILD 094 - Tarjeta de ganador compacta y ordenada

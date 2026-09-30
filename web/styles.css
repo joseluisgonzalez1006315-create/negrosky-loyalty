@@ -248,3 +248,17 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 #customer-raffles .raffle-winner-photo figcaption{margin-top:7px;color:#dbeafe;font-size:12px}
 #customer-raffles .raffle-winner-thanks{margin-top:16px;color:#d1fae5;font-size:13px}
 @media(max-width:520px){#customer-raffles .raffle-winner-prominent{padding:18px 14px 16px}#customer-raffles .raffle-winning-number{font-size:clamp(58px,22vw,92px)}#customer-raffles .raffle-winner-photo img{max-height:240px}}
+
+/* Ajuste final del módulo de rifas: contenido contenido y sin desbordamiento */
+#customer-raffles .raffle-card{overflow:hidden!important;min-width:0!important}
+#customer-raffles .raffle-card-header{display:grid;gap:7px;min-width:0}
+#customer-raffles .raffle-card-header .eyebrow{margin:0;line-height:1.2}
+#customer-raffles .raffle-card-header h2{margin:0;line-height:1.18;overflow-wrap:anywhere}
+#customer-raffles .raffle-card-header p:not(.eyebrow){margin:0;line-height:1.45;overflow-wrap:anywhere}
+#customer-raffles .raffle-prize-image{display:block;width:100%;max-width:360px;height:170px;margin:0 auto 16px;object-fit:contain;border-radius:14px;background:#090910;border:1px solid #ffffff20}
+#customer-raffles .raffle-winner-prominent{box-sizing:border-box;width:100%;max-width:100%;margin-left:0;margin-right:0;overflow:hidden}
+#customer-raffles .raffle-number-badge{display:grid;place-items:center;width:154px;height:154px;margin:8px auto 12px;border:4px solid #fbbf24;border-radius:50%;background:radial-gradient(circle at 35% 28%,#46330b,#120f08 72%);box-shadow:0 0 0 7px #fbbf241c,0 8px 26px #0007}
+#customer-raffles .raffle-number-badge .raffle-winning-number{margin:0;font-size:clamp(48px,13vw,76px);line-height:1}
+#customer-raffles .raffle-winner-photo{width:min(100%,280px);margin:16px auto 0}
+#customer-raffles .raffle-winner-photo img{width:100%;height:180px;max-height:180px;object-fit:cover;border-radius:13px}
+@media(max-width:520px){#customer-raffles .raffle-card{padding:14px!important}#customer-raffles .raffle-prize-image{height:135px;margin-bottom:13px}#customer-raffles .raffle-number-badge{width:132px;height:132px}#customer-raffles .raffle-number-badge .raffle-winning-number{font-size:52px}#customer-raffles .raffle-winner-photo{width:min(100%,240px)}#customer-raffles .raffle-winner-photo img{height:155px;max-height:155px}}
