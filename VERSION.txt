@@ -1,1 +1,1 @@
-BUILD 071 - QR de rifas ilimitadas corregido
+BUILD 072 - cache critico de rifas actualizado
