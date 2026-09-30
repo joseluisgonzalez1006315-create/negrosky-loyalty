@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.83")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.84")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1119,7 +1119,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.83", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.84", "build": "074", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -4509,6 +4509,17 @@ def public_raffle_numbers(slug:str,raffle_id:int):
         pending={int(x["ticket_number"]) for x in con.execute("SELECT ticket_number FROM raffle_tickets WHERE raffle_id=? AND status='pending'",(raffle_id,)).fetchall() if str(x["ticket_number"]).isdigit()}
         total=r["ticket_count"] or 0
         return {"total":total,"max_per_purchase":r["tickets_per_purchase"] or 1,"used":sorted(used),"pending":sorted(pending),"available":[] if not total else [n for n in range(1,total+1) if n not in used and n not in pending]}
+
+@app.get("/api/raffles/tickets/search")
+def search_raffle_tickets(q: str = "", tenant_id: int | None = None, user=Depends(require("super_admin", "business_admin", "branch_admin", "worker"))):
+    with connection() as con:
+        scope=None if user["role"]=="super_admin" and tenant_id is None else tenant_scope(user,tenant_id)
+        text=str(q or "").strip().upper()
+        sql="SELECT t.*,r.name raffle_name,r.tenant_id FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE (upper(t.ticket_number) LIKE ? OR upper(t.customer_name) LIKE ? OR t.customer_phone LIKE ?)"
+        args=[f"%{text}%",f"%{text}%",f"%{text}%"]
+        if scope is not None: sql += " AND r.tenant_id=?"; args.append(scope)
+        rows=con.execute(sql+" ORDER BY t.id DESC LIMIT 100",args).fetchall()
+        return [row_dict(x) for x in rows]
 
 @app.get("/api/raffles/tickets/pending")
 def pending_raffle_tickets(tenant_id:int|None=None,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):

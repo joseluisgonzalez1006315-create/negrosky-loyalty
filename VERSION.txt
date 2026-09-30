@@ -1,1 +1,1 @@
-BUILD 083 - Recompra verificada y horario manual
+BUILD 084 - Control de rifas e historial
