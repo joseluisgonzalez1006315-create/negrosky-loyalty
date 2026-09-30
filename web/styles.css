@@ -262,3 +262,8 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 #customer-raffles .raffle-winner-photo{width:min(100%,280px);margin:16px auto 0}
 #customer-raffles .raffle-winner-photo img{width:100%;height:180px;max-height:180px;object-fit:cover;border-radius:13px}
 @media(max-width:520px){#customer-raffles .raffle-card{padding:14px!important}#customer-raffles .raffle-prize-image{height:135px;margin-bottom:13px}#customer-raffles .raffle-number-badge{width:132px;height:132px}#customer-raffles .raffle-number-badge .raffle-winning-number{font-size:52px}#customer-raffles .raffle-winner-photo{width:min(100%,240px)}#customer-raffles .raffle-winner-photo img{height:155px;max-height:155px}}
+/* Build 097: imágenes de rifas sin franjas y edición de rifa */
+#customer-raffles .raffle-prize-image{height:auto!important;max-height:360px!important;object-fit:contain!important;background:transparent!important;object-position:center!important}
+#customer-raffles .raffle-winner-photo{max-width:min(100%,360px)!important;width:auto!important}
+#customer-raffles .raffle-winner-photo img{width:auto!important;max-width:100%!important;height:auto!important;max-height:360px!important;object-fit:contain!important;background:transparent!important;object-position:center!important}
+@media(max-width:520px){#customer-raffles .raffle-prize-image{max-height:280px!important}#customer-raffles .raffle-winner-photo img{max-height:280px!important}}

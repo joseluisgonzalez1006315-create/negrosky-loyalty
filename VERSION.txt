@@ -1,1 +1,1 @@
-BUILD 096 - Horarios simples, sesión persistente y negocio activo
+BUILD 097 - Edición completa de rifas e imágenes adaptables
