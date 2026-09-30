@@ -547,3 +547,6 @@ setTimeout(()=>{const modal=document.getElementById('onboarding-modal');if(!moda
 
 // BUILD 068 visible
 document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 068 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 068';
+
+// BUILD 069 visible
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 069 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 069';

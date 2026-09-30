@@ -837,7 +837,7 @@ def require_service_open(con, tenant_id, branch_id=None):
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
-        "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=?",
+        "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=? ORDER BY id DESC LIMIT 1",
         (tenant_id, module_key),
     ).fetchone()
     if tenant_value is not None:
@@ -846,7 +846,7 @@ def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None =
             return False
     if branch_id is not None:
         branch_value = con.execute(
-            "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id=? AND module_key=?",
+            "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id=? AND module_key=? ORDER BY id DESC LIMIT 1",
             (tenant_id, branch_id, module_key),
         ).fetchone()
         if branch_value is not None:
@@ -2009,10 +2009,10 @@ def update_tenant_modules(data: ModuleSettingsInput, user=Depends(require("super
         # A missing value keeps the current effective state, preventing an
         # incomplete browser request from silently disabling a module.
         next_values = {key: bool(data.modules.get(key, before[key])) for key in MODULE_KEYS}
-        con.execute(
-            "DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS ?",
-            (scope, data.branch_id),
-        )
+        if data.branch_id is None:
+            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (scope,))
+        else:
+            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id=?", (scope, data.branch_id))
         con.executemany(
             "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, ?, ?, ?)",
             [(scope, data.branch_id, key, int(value)) for key, value in next_values.items()],
@@ -2069,7 +2069,11 @@ def update_service_settings(data: ServiceSettingsInput, tenant_id: int | None = 
         if user["role"] == "super_admin":
             current = effective_modules(con, scope, branch_id)
             values = {key: bool(data.modules.get(key, current[key])) for key in MODULE_KEYS}
-            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS ?", (scope, branch_id))
+            
+            if branch_id is None:
+                con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (scope,))
+            else:
+                con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id=?", (scope, branch_id))
             con.executemany(
                 "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, ?, ?, ?)",
                 [(scope, branch_id, key, int(value)) for key, value in values.items()],
