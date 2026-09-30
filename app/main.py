@@ -2983,14 +2983,25 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
     return {"status": "pending", "operation": token["operation_type"]}
 
 
+def validation_branch_for(user, token):
+    """Resolve the branch for an operation without forcing business owners to have one."""
+    user_branch = user.get("branch_id")
+    token_branch = token["branch_id"]
+    if user.get("role") in {"worker", "branch_admin"} and user_branch is None:
+        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+    if user_branch is not None and token_branch is not None and user_branch != token_branch:
+        raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+    return user_branch if user_branch is not None else token_branch
+
+
 @app.get("/api/operations/preview/{code}")
-def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))):
+def preview_operation(code: str, user=Depends(require("worker", "branch_admin", "business_admin"))):
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=422, detail="El código debe tener seis números")
     now = datetime.now(timezone.utc)
     with connection() as con:
-        require_service_open(con, user["tenant_id"], user["branch_id"])
-        require_user_module(con, user, "loyalty", user["branch_id"])
+        require_service_open(con, user["tenant_id"], user.get("branch_id"))
+        require_user_module(con, user, "loyalty", user.get("branch_id"))
         require_worker_access(con, user, "validate_purchase")
         token = con.execute(
             """SELECT ot.*, c.name AS customer_name, c.phone AS customer_phone,
@@ -3003,7 +3014,7 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))
         ).fetchone()
         if not token:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
+        if user.get("branch_id") is not None and token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
             raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
         if token["used_at"]:
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
@@ -3027,20 +3038,17 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))
 
 
 @app.post("/api/operations/validate-purchase")
-def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin", "business_admin"))):
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
-        require_service_open(con, user["tenant_id"], user["branch_id"])
-        require_user_module(con, user, "loyalty", user["branch_id"])
+        require_service_open(con, user["tenant_id"], user.get("branch_id"))
+        require_user_module(con, user, "loyalty", user.get("branch_id"))
         require_worker_access(con, user, "validate_purchase")
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type='purchase'", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
@@ -3067,12 +3075,12 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker
             """INSERT INTO purchases
             (tenant_id, branch_id, customer_id, program_id, worker_id, operation_token_id)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (token["tenant_id"], user["branch_id"], token["customer_id"], token["program_id"], user["id"], token["id"]),
+            (token["tenant_id"], validation_branch, token["customer_id"], token["program_id"], user["id"], token["id"]),
         )
         audit(con, user, "validate", "purchase", cur.lastrowid, {"customer_id": token["customer_id"]})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], user["branch_id"], token["customer_id"], "purchase",
+            con, token["tenant_id"], validation_branch, token["customer_id"], "purchase",
             "Nueva compra validada",
             f"{user['name']} registró una compra de {customer_row['name']} en {program['name']}.",
         )
@@ -3129,20 +3137,17 @@ def create_reward_batch_token(data: RewardBatchInput, request: Request, customer
 
 
 @app.post("/api/operations/validate-reward")
-def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin", "business_admin"))):
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
-        require_service_open(con, user["tenant_id"], user["branch_id"])
-        require_user_module(con, user, "loyalty", user["branch_id"])
+        require_service_open(con, user["tenant_id"], user.get("branch_id"))
+        require_user_module(con, user, "loyalty", user.get("branch_id"))
         require_worker_access(con, user, "validate_reward")
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type IN ('reward','reward_batch')", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
@@ -3161,13 +3166,13 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
             rewards = [reward]
         con.executemany(
             "UPDATE rewards SET status='used', claimed_at=?, branch_id=?, worker_id=? WHERE id=?",
-            [(now.isoformat(), user["branch_id"], user["id"], reward["id"]) for reward in rewards],
+            [(now.isoformat(), validation_branch, user["id"], reward["id"]) for reward in rewards],
         )
         con.execute("UPDATE operation_tokens SET used_at=? WHERE id=?", (now.isoformat(), token["id"]))
         audit(con, user, "validate", "reward", rewards[0]["id"], {"customer_id": rewards[0]["customer_id"], "quantity": len(rewards)})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], user["branch_id"], token["customer_id"], "reward",
+            con, token["tenant_id"], validation_branch, token["customer_id"], "reward",
             "Premio entregado",
             f"{user['name']} entregó {len(rewards)} premio(s) a {customer_row['name']}: {rewards[0]['name']}.",
         )
