@@ -1,1 +1,1 @@
-BUILD 091 - Ganador grande y fotos desde el dispositivo
+BUILD 092 - Ganador grande, fotos comprimidas y migración cloud

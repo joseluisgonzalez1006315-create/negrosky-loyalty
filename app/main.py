@@ -490,6 +490,18 @@ def bootstrap_admin():
             )
 
 
+def ensure_raffle_winner_photo_column():
+    """Add the winner delivery photo column to cloud PostgreSQL deployments."""
+    if not using_postgres():
+        return
+    try:
+        with connection() as con:
+            con.execute("ALTER TABLE raffles ADD COLUMN IF NOT EXISTS winner_photo_url TEXT")
+    except Exception:
+        # Do not prevent the service from starting if an older schema is still being migrated.
+        pass
+
+
 def ensure_general_business_purchases():
     """Permite compras sin sucursal para negocios generales.
 
@@ -508,6 +520,7 @@ def ensure_general_business_purchases():
 def startup():
     global _maintenance_task
     init_db()
+    ensure_raffle_winner_photo_column()
     sync_module_defaults()
     ensure_general_business_purchases()
     ensure_runtime_indexes()
@@ -4406,7 +4419,7 @@ def update_raffle_winner_photo(raffle_id:int,data:dict,user=Depends(require("sup
         tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
         url=str((data or {}).get("winner_photo_url") or "").strip() or None
         if url and url.startswith("data:"):
-            if not re.fullmatch(r"data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+", url) or len(url) > 2_400_000:
+            if not re.fullmatch(r"data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+", url) or len(url) > 1_500_000:
                 raise HTTPException(413, "La foto debe ser JPG, PNG o WebP y pesar máximo 2 MB")
         elif url and not re.match(r"^https?://", url, re.I):
             raise HTTPException(422, "La foto debe ser una imagen cargada o una URL pública https")
