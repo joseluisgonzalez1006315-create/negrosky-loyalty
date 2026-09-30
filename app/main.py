@@ -63,6 +63,45 @@ def row_dict(row):
     return dict(row) if row else None
 
 
+def optimize_uploaded_image(content: bytes, max_side: int, quality: int = 82):
+    """Reduce new branding/icon images before storing them in PostgreSQL."""
+    try:
+        from PIL import Image
+        source = io.BytesIO(content)
+        image = Image.open(source)
+        image.load()
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
+        output = io.BytesIO()
+        image.save(output, format="WEBP", quality=quality, method=6)
+        optimized = output.getvalue()
+        if optimized and len(optimized) < len(content):
+            return "image/webp", optimized
+    except Exception:
+        pass
+    return None, content
+
+
+def ensure_runtime_indexes():
+    """Indexes for the most frequent public and validation lookups."""
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_operation_tokens_lookup ON operation_tokens(code, tenant_id, used_at)",
+        "CREATE INDEX IF NOT EXISTS idx_rewards_customer_program ON rewards(customer_id, program_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchases_customer_tenant ON purchases(customer_id, tenant_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_raffle_tickets_raffle_status ON raffle_tickets(raffle_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_raffle_tickets_customer ON raffle_tickets(customer_phone, raffle_id)",
+        "CREATE INDEX IF NOT EXISTS idx_loyalty_cards_customer_program ON loyalty_cards(customer_id, program_id)",
+    )
+    try:
+        with connection() as con:
+            for statement in statements:
+                con.execute(statement)
+    except Exception:
+        # A partially migrated project must still start; existing indexes remain valid.
+        pass
+
+
 def new_operation_code(con):
     for _ in range(20):
         code = f"{secrets.randbelow(1_000_000):06d}"
@@ -471,6 +510,7 @@ def startup():
     init_db()
     sync_module_defaults()
     ensure_general_business_purchases()
+    ensure_runtime_indexes()
     bootstrap_admin()
     # Se ejecuta una vez al iniciar y luego cada 24 horas. Si el proceso se
     # reinicia, vuelve a comprobar la copia del día sin crear otra histórica.
@@ -1703,6 +1743,9 @@ def update_branding_logo(data: BrandingLogoInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido de la imagen no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 512, 84)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         require_user_module(con, user, "public_page")
         if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
@@ -1770,6 +1813,9 @@ def update_branding_background(data: BrandingBackgroundInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido del fondo no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 1600, 80)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         require_user_module(con, user, "public_page")
         _save_branding_fields(con, scope, {"background_mime": mime, "background_blob": content})
@@ -2598,6 +2644,9 @@ def update_program_icon(program_id: int, data: ProgramIconInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido de la imagen no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 256, 84)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         program = con.execute("SELECT * FROM loyalty_programs WHERE id=?", (program_id,)).fetchone()
         if not program:
@@ -2902,7 +2951,7 @@ def customer_history(customer=Depends(current_customer)):
             """SELECT p.id, p.created_at, lp.name AS program_name, b.name AS branch_name
             FROM purchases p
             JOIN loyalty_programs lp ON lp.id=p.program_id
-            JOIN branches b ON b.id=p.branch_id
+            LEFT JOIN branches b ON b.id=p.branch_id
             WHERE p.customer_id=? AND p.tenant_id=?
             ORDER BY p.id DESC""",
             (customer["id"], customer["tenant_id"]),
@@ -2997,6 +3046,15 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
     return {"status": "pending", "operation": token["operation_type"]}
 
 
+def validation_branch_for(user, token):
+    """Permite validar desde negocio general y respeta QR de sucursal."""
+    user_branch = user.get("branch_id")
+    token_branch = token["branch_id"]
+    if user_branch is not None and token_branch is not None and user_branch != token_branch:
+        raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+    return user_branch if user_branch is not None else token_branch
+
+
 @app.get("/api/operations/preview/{code}")
 def preview_operation(code: str, user=Depends(require("business_admin", "worker", "branch_admin"))):
     if len(code) != 6 or not code.isdigit():
@@ -3018,7 +3076,7 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
         ).fetchone()
         if not token:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != branch_id:
+        if user.get("branch_id") is not None and token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
             raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
         if token["used_at"]:
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
@@ -3055,8 +3113,7 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("busine
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type='purchase'", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != branch_id:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
@@ -3083,7 +3140,7 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("busine
             """INSERT INTO purchases
             (tenant_id, branch_id, customer_id, program_id, worker_id, operation_token_id)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (token["tenant_id"], branch_id, token["customer_id"], token["program_id"], user["id"], token["id"]),
+            (token["tenant_id"], validation_branch, token["customer_id"], token["program_id"], user["id"], token["id"]),
         )
         audit(con, user, "validate", "purchase", cur.lastrowid, {"customer_id": token["customer_id"]})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
