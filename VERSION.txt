@@ -1,1 +1,1 @@
-BUILD 082 - Reintento de rifa tras rechazo
+BUILD 083 - Recompra verificada y horario manual
