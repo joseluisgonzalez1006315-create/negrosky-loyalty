@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from .database import connection, database_path, init_db, INTEGRITY_ERRORS, using_postgres
 from .schemas import (
@@ -28,7 +29,7 @@ from .schemas import (
     OperationTokenInput, RewardBatchInput, TenantInput, TenantUpdate, UserInput, ValidateOperationInput, LoyaltyProgramUpdate, LoyaltyProgramStatusUpdate,
     ServiceSettingsInput, CopyServiceSettingsInput, UserUpdate, UserStatusInput,
     PasswordChangeInput, SupportCodeInput, SupportResetInput, AssistedCustomerInput,
-    CustomerMetaInput, MergeCustomersInput, RestoreBackupInput, ResetPlatformInput,
+    CustomerMetaInput, CustomerProfileInput, MergeCustomersInput, RestoreBackupInput, ResetPlatformInput,
     AppointmentServiceInput, AppointmentServiceStatusInput, AppointmentBookingInput,
     AppointmentStatusInput, AppointmentCancelInput, AppointmentDelayInput,
     BrandingInput, BrandingLogoInput, BrandingBackgroundInput, ProgramIconInput,
@@ -44,17 +45,61 @@ ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
 app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.121")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 @app.middleware("http")
 async def no_browser_cache(request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
+    if "cache-control" not in response.headers:
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "public, max-age=86400, stale-while-revalidate=604800"
+        else:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
     return response
 
 
 def row_dict(row):
     return dict(row) if row else None
+
+
+def optimize_uploaded_image(content: bytes, max_side: int, quality: int = 82):
+    """Reduce new branding/icon images before storing them in PostgreSQL."""
+    try:
+        from PIL import Image
+        source = io.BytesIO(content)
+        image = Image.open(source)
+        image.load()
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
+        output = io.BytesIO()
+        image.save(output, format="WEBP", quality=quality, method=6)
+        optimized = output.getvalue()
+        if optimized and len(optimized) < len(content):
+            return "image/webp", optimized
+    except Exception:
+        pass
+    return None, content
+
+
+def ensure_runtime_indexes():
+    """Indexes for the most frequent public and validation lookups."""
+    statements = (
+        "CREATE INDEX IF NOT EXISTS idx_operation_tokens_lookup ON operation_tokens(code, tenant_id, used_at)",
+        "CREATE INDEX IF NOT EXISTS idx_rewards_customer_program ON rewards(customer_id, program_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchases_customer_tenant ON purchases(customer_id, tenant_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_raffle_tickets_raffle_status ON raffle_tickets(raffle_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_raffle_tickets_customer ON raffle_tickets(customer_phone, raffle_id)",
+        "CREATE INDEX IF NOT EXISTS idx_loyalty_cards_customer_program ON loyalty_cards(customer_id, program_id)",
+    )
+    try:
+        with connection() as con:
+            for statement in statements:
+                con.execute(statement)
+    except Exception:
+        # A partially migrated project must still start; existing indexes remain valid.
+        pass
 
 
 def new_operation_code(con):
@@ -421,6 +466,20 @@ def _restore_backup_path(source: Path):
         raise HTTPException(status_code=409, detail="El archivo ZIP está dañado")
 
 
+def audit_datetime_utc(value):
+    """Normaliza fechas de auditoría SQLite/PostgreSQL a UTC con zona horaria."""
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 def audit(con, user, action, entity_type, entity_id=None, details=None):
     con.execute(
         """INSERT INTO audit_logs
@@ -445,11 +504,71 @@ def bootstrap_admin():
             )
 
 
+def ensure_raffle_winner_photo_column():
+    """Add the winner delivery photo column to cloud PostgreSQL deployments."""
+    if not using_postgres():
+        return
+    try:
+        with connection() as con:
+            con.execute("ALTER TABLE raffles ADD COLUMN IF NOT EXISTS winner_photo_url TEXT")
+    except Exception:
+        # Do not prevent the service from starting if an older schema is still being migrated.
+        pass
+
+
+def ensure_general_business_purchases():
+    """Permite compras sin sucursal para negocios generales.
+
+    Las sucursales siguen siendo obligatorias cuando el QR pertenece a una
+    sucursal concreta, pero un negocio general guarda branch_id como NULL.
+    """
+    if not using_postgres():
+        return
+    with connection() as con:
+        # La migración es idempotente y funciona para la base local restaurada
+        # y para Supabase/PostgreSQL.
+        con.execute("ALTER TABLE purchases ALTER COLUMN branch_id DROP NOT NULL")
+
+
+def ensure_platform_settings_table():
+    with connection() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS platform_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+
+def landing_contact_values(con):
+    rows=con.execute("SELECT key,value FROM platform_settings WHERE key IN ('landing_whatsapp','landing_facebook','landing_tiktok')").fetchall()
+    values={row["key"]: row["value"] for row in rows}
+    return {
+        "whatsapp": values.get("landing_whatsapp") or "https://wa.me/573001234567?text=Hola%20Negrosky%2C%20quiero%20conocer%20Loyalty",
+        "facebook": values.get("landing_facebook") or "https://www.facebook.com/",
+        "tiktok": values.get("landing_tiktok") or "https://www.tiktok.com/",
+    }
+
+
+def normalize_landing_link(value, kind):
+    value=str(value or '').strip()
+    if kind == 'whatsapp' and value and not value.lower().startswith(('http://','https://')):
+        digits=''.join(ch for ch in value if ch.isdigit())
+        if not digits: raise HTTPException(status_code=422, detail='Escribe un número de WhatsApp válido')
+        value='https://wa.me/'+digits
+    if value and not value.lower().startswith(('http://','https://')):
+        raise HTTPException(status_code=422, detail='Los enlaces deben comenzar por https://')
+    return value
+
+
 @app.on_event("startup")
 def startup():
     global _maintenance_task
     init_db()
+    ensure_platform_settings_table()
+    ensure_raffle_winner_photo_column()
     sync_module_defaults()
+    ensure_general_business_purchases()
+    ensure_runtime_indexes()
     bootstrap_admin()
     # Se ejecuta una vez al iniciar y luego cada 24 horas. Si el proceso se
     # reinicia, vuelve a comprobar la copia del día sin crear otra histórica.
@@ -526,6 +645,30 @@ def require(*roles):
             raise HTTPException(status_code=403, detail="No tiene permiso")
         return user
     return dependency
+
+
+@app.get("/api/public/landing-contact")
+def public_landing_contact():
+    init_db()
+    with connection() as con:
+        return landing_contact_values(con)
+
+
+@app.get("/api/platform-contact")
+def get_platform_contact(user=Depends(require("super_admin"))):
+    with connection() as con:
+        return landing_contact_values(con)
+
+
+@app.put("/api/platform-contact")
+def update_platform_contact(data: dict, user=Depends(require("super_admin"))):
+    values={key: normalize_landing_link(data.get(key), key) for key in ('whatsapp','facebook','tiktok')}
+    with connection() as con:
+        for key,value in values.items():
+            storage_key='landing_'+key
+            con.execute("""INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP""", (storage_key,value))
+    return values
 
 
 WORKER_ACCESS_PERMISSIONS = {
@@ -776,7 +919,7 @@ def require_service_open(con, tenant_id, branch_id=None):
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
-        "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=?",
+        "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL AND module_key=? ORDER BY id DESC LIMIT 1",
         (tenant_id, module_key),
     ).fetchone()
     if tenant_value is not None:
@@ -785,7 +928,7 @@ def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None =
             return False
     if branch_id is not None:
         branch_value = con.execute(
-            "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id=? AND module_key=?",
+            "SELECT enabled FROM feature_modules WHERE tenant_id=? AND branch_id=? AND module_key=? ORDER BY id DESC LIMIT 1",
             (tenant_id, branch_id, module_key),
         ).fetchone()
         if branch_value is not None:
@@ -886,14 +1029,14 @@ def appointment_fits_hours(con, tenant_id: int, branch_id: int, starts_utc: date
     return _hours_open(rows, start_local) and _hours_open(rows, end_local)
 
 
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(WEB / "index.html")
+
 @app.get("/inicio", include_in_schema=False)
 @app.get("/landing", include_in_schema=False)
 def landing_page():
     return FileResponse(WEB / "landing.html", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
-
-@app.get("/", include_in_schema=False)
-def index():
-    return FileResponse(WEB / "index.html")
 
 @app.get("/manifest.webmanifest", include_in_schema=False)
 def pwa_manifest():
@@ -901,7 +1044,7 @@ def pwa_manifest():
 
 @app.get("/service-worker.js", include_in_schema=False)
 def pwa_service_worker():
-    return FileResponse(WEB / "service-worker.js", media_type="application/javascript")
+    return FileResponse(WEB / "service-worker.js", media_type="application/javascript", headers={"Cache-Control":"no-store"})
 
 @app.get("/api/public/{slug}/manifest.webmanifest", include_in_schema=False)
 def customer_manifest(slug: str):
@@ -923,13 +1066,7 @@ def customer_manifest(slug: str):
 
 @app.get("/b/{slug}", include_in_schema=False)
 def customer_page(slug: str):
-    init_db()
-    with connection() as con:
-        tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
-        if not tenant:
-            raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        require_public_module(con, tenant["id"], "public_page")
-    return FileResponse(WEB / "customer.html")
+    return FileResponse(WEB / "customer.html", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma":"no-cache"})
 
 @app.get("/cliente", include_in_schema=False)
 def customer_directory_page():
@@ -959,15 +1096,16 @@ def business_poster_page(slug: str):
     return FileResponse(WEB / "poster.html")
 
 @app.get("/q/{public_key}", include_in_schema=False)
-def permanent_business_qr(public_key: str):
+def permanent_business_qr(public_key: str, branch: int | None = None):
     init_db()
     with connection() as con:
         tenant = con.execute("SELECT id,slug FROM tenants WHERE public_key=? AND status='active' AND deleted_at IS NULL", (public_key,)).fetchone()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Código del negocio no encontrado")
-    with connection() as con:
+        if not tenant: raise HTTPException(status_code=404, detail="Código del negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
-    return RedirectResponse(url=f"/b/{tenant['slug']}", status_code=307)
+        if branch is not None and not con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch, tenant["id"])).fetchone():
+            raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+    target=f"/b/{tenant['slug']}" + (f"?branch={branch}" if branch is not None else "")
+    return RedirectResponse(url=target, status_code=307)
 
 
 @app.get("/worker", include_in_schema=False)
@@ -992,7 +1130,7 @@ def qr_image(code: str, request: Request):
     )
 
 @app.get("/api/public/{slug}/qr.png", include_in_schema=False)
-def public_business_qr(slug: str, request: Request):
+def public_business_qr(slug: str, request: Request, branch_id: int | None = None):
     init_db()
     with connection() as con:
         tenant = con.execute("SELECT id,slug,public_key FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
@@ -1014,13 +1152,32 @@ def public_business_qr(slug: str, request: Request):
             pass
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates: host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    target = f"{request.url.scheme}://{host}:{request.url.port or 8030}/q/{tenant['public_key']}"
+    target = f"{public_base_url(request, host)}/q/{tenant['public_key']}"
+    if branch_id is not None:
+        with connection() as con:
+            if not con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? AND status='active'", (branch_id, tenant["id"])).fetchone():
+                raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        target += f"?branch={branch_id}"
     output = io.BytesIO(); qrcode.make(target).save(output, format="PNG"); output.seek(0)
     return StreamingResponse(output, media_type="image/png", headers={"Cache-Control": "no-store", "X-QR-Target": target})
 
 
+def public_base_url(request: Request, host: str | None = None) -> str:
+    configured = (os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip().rstrip("/")
+    if configured: return configured
+    forwarded_host = request.headers.get("x-forwarded-host")
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    host = (host or forwarded_host or request.url.hostname or "127.0.0.1").split(",", 1)[0].strip()
+    scheme = (forwarded_proto or request.url.scheme or "http").split(",", 1)[0].strip()
+    if host not in {"localhost", "127.0.0.1", "0.0.0.0"}: return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{request.url.port or 8030}"
+
+def _public_origin(request: Request) -> str:
+    return public_base_url(request)
+
+
 def worker_link(request: Request, code: str) -> str:
-    """Use a reachable local address for a QR generated from a PC localhost tab."""
+    """Use the public host without leaking the local :8030 port."""
     host = request.url.hostname or "127.0.0.1"
     if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
         try:
@@ -1036,7 +1193,7 @@ def worker_link(request: Request, code: str) -> str:
         candidates = [ip for ip in candidates if usable_lan_address(ip)]
         if candidates:
             host = sorted(candidates, key=lambda ip: (not ip.startswith("192.168."), ip))[0]
-    return f"{request.url.scheme}://{host}:{request.url.port or 8030}/worker?code={code}"
+    return f"{public_base_url(request, host)}/worker?code={code}"
 
 
 def usable_lan_address(value: str) -> bool:
@@ -1673,6 +1830,9 @@ def update_branding_logo(data: BrandingLogoInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido de la imagen no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 512, 84)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         require_user_module(con, user, "public_page")
         if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
@@ -1703,7 +1863,7 @@ def public_branding(slug: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
-        return branding_payload(con, tenant["id"])
+        return JSONResponse(branding_payload(con, tenant["id"]), headers={"Cache-Control": "public, max-age=15, stale-while-revalidate=60"})
 
 
 @app.get("/api/public/branding/{tenant_id}/logo", include_in_schema=False)
@@ -1717,7 +1877,7 @@ def public_branding_logo(tenant_id: int):
     if not row or not row["logo_blob"]:
         raise HTTPException(status_code=404, detail="Logo no encontrado")
     return StreamingResponse(io.BytesIO(row["logo_blob"]), media_type=row["logo_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 
 @app.post("/api/branding/background")
@@ -1740,6 +1900,9 @@ def update_branding_background(data: BrandingBackgroundInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido del fondo no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 1600, 80)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         require_user_module(con, user, "public_page")
         _save_branding_fields(con, scope, {"background_mime": mime, "background_blob": content})
@@ -1771,7 +1934,7 @@ def public_branding_background(tenant_id: int):
     if not row or not row["background_blob"]:
         raise HTTPException(status_code=404, detail="Fondo no encontrado")
     return StreamingResponse(io.BytesIO(row["background_blob"]), media_type=row["background_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 
 @app.delete("/api/branding/reset")
@@ -1933,10 +2096,10 @@ def update_tenant_modules(data: ModuleSettingsInput, user=Depends(require("super
         # A missing value keeps the current effective state, preventing an
         # incomplete browser request from silently disabling a module.
         next_values = {key: bool(data.modules.get(key, before[key])) for key in MODULE_KEYS}
-        con.execute(
-            "DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS ?",
-            (scope, data.branch_id),
-        )
+        if data.branch_id is None:
+            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (scope,))
+        else:
+            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id=?", (scope, data.branch_id))
         con.executemany(
             "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, ?, ?, ?)",
             [(scope, data.branch_id, key, int(value)) for key, value in next_values.items()],
@@ -1993,7 +2156,11 @@ def update_service_settings(data: ServiceSettingsInput, tenant_id: int | None = 
         if user["role"] == "super_admin":
             current = effective_modules(con, scope, branch_id)
             values = {key: bool(data.modules.get(key, current[key])) for key in MODULE_KEYS}
-            con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS ?", (scope, branch_id))
+            
+            if branch_id is None:
+                con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (scope,))
+            else:
+                con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id=?", (scope, branch_id))
             con.executemany(
                 "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, ?, ?, ?)",
                 [(scope, branch_id, key, int(value)) for key, value in values.items()],
@@ -2409,7 +2576,7 @@ def customer_profile(customer_id: int,
             """SELECT p.id, p.created_at, lp.name AS program_name, b.name AS branch_name,
             u.name AS worker_name FROM purchases p
             JOIN loyalty_programs lp ON lp.id=p.program_id
-            JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id
+            LEFT JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id
             WHERE p.customer_id=? ORDER BY p.id DESC LIMIT 100""",
             (customer_id,),
         ).fetchall()
@@ -2428,6 +2595,16 @@ def customer_profile(customer_id: int,
         raffle_tickets = con.execute("""SELECT t.id,t.ticket_number,t.status,t.created_at,r.name AS raffle_name
             FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id
             WHERE t.customer_phone=? AND r.tenant_id=? ORDER BY t.id DESC LIMIT 200""", (customer["phone"],customer["tenant_id"])).fetchall()
+        profile_changes = con.execute("""SELECT a.id,a.action,a.details,a.created_at,a.branch_id,b.name AS branch_name
+            FROM audit_logs a LEFT JOIN branches b ON b.id=a.branch_id
+            WHERE a.tenant_id=? AND a.entity_type='customer' AND a.entity_id=?
+              AND a.action='profile_update' ORDER BY a.id DESC LIMIT 100""", (customer["tenant_id"], customer_id)).fetchall()
+    changes=[]
+    for row in profile_changes:
+        item=row_dict(row)
+        try:item["details"]=json.loads(item.get("details") or "{}")
+        except Exception:pass
+        changes.append(item)
     return {
         "customer": row_dict(customer),
         "cards": [row_dict(row) for row in cards],
@@ -2435,6 +2612,7 @@ def customer_profile(customer_id: int,
         "rewards": [row_dict(row) for row in rewards],
         "raffle_operations": [row_dict(row) for row in raffle_operations],
         "raffle_tickets": [row_dict(row) for row in raffle_tickets],
+        "profile_changes": changes,
     }
 
 
@@ -2568,6 +2746,9 @@ def update_program_icon(program_id: int, data: ProgramIconInput,
              (mime == "image/webp" and content.startswith(b"RIFF") and content[8:12] == b"WEBP"))
     if not valid:
         raise HTTPException(status_code=422, detail="El contenido de la imagen no coincide con su formato")
+    optimized_mime, optimized_content = optimize_uploaded_image(content, 256, 84)
+    if optimized_mime:
+        mime, content = optimized_mime, optimized_content
     with connection() as con:
         program = con.execute("SELECT * FROM loyalty_programs WHERE id=?", (program_id,)).fetchone()
         if not program:
@@ -2611,7 +2792,7 @@ def public_program_icon(program_id: int):
     if not row:
         raise HTTPException(status_code=404, detail="Icono no encontrado")
     return StreamingResponse(io.BytesIO(row["icon_blob"]), media_type=row["icon_mime"],
-                             headers={"Cache-Control": "public, max-age=300"})
+                             headers={"Cache-Control": "public, max-age=86400, stale-while-revalidate=604800"})
 
 @app.put("/api/loyalty-programs/{program_id}/status")
 def update_program_status(program_id: int, data: LoyaltyProgramStatusUpdate, user=Depends(require("super_admin", "business_admin"))):
@@ -2707,6 +2888,30 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
     safe = row_dict(customer)
     return {"customer": safe, "access_token": create_customer_token(safe), "token_type": "bearer"}
 
+@app.put("/api/public/me/profile")
+def update_customer_profile(data: CustomerProfileInput, customer=Depends(current_customer)):
+    """Actualiza el perfil conservando el ID y el progreso del cliente."""
+    phone = "".join(ch for ch in data.phone if ch.isdigit())
+    name = data.name.strip()
+    with connection() as con:
+        before=con.execute("SELECT * FROM customers WHERE id=? AND tenant_id=?", (customer["id"], customer["tenant_id"])).fetchone()
+        duplicate = con.execute("SELECT id FROM customers WHERE tenant_id=? AND phone=? AND id<>? AND status!='merged'", (customer["tenant_id"], phone, customer["id"])).fetchone()
+        if duplicate: raise HTTPException(status_code=409, detail="Ese celular ya pertenece a otro cliente")
+        changed={}
+        for field,new_value in {"name":name,"phone":phone,"birth_date":data.birth_date,"birthday_consent":int(bool(data.birthday_consent))}.items():
+            old_value=before[field] if before else None
+            if str(old_value or '') != str(new_value or ''): changed[field]={"before":old_value,"after":new_value}
+        con.execute("UPDATE customers SET name=?, search_key=?, phone=?, birth_date=?, birthday_consent=? WHERE id=? AND tenant_id=? AND status='active'", (name, normalize_search(name), phone, data.birth_date, int(bool(data.birthday_consent)), customer["id"], customer["tenant_id"]))
+        if changed:
+            details={"actor_type":"customer","actor_name":name,"actor_phone":phone,"changed":changed}
+            con.execute("""INSERT INTO audit_logs (tenant_id,branch_id,user_id,action,entity_type,entity_id,details)
+                VALUES (?,?,?,?,?,?,?)""", (customer["tenant_id"],customer.get("origin_branch_id"),None,"profile_update","customer",customer["id"],json.dumps(details,ensure_ascii=False)))
+            add_notification(con,customer["tenant_id"],customer.get("origin_branch_id"),customer["id"],"profile_update","Perfil actualizado",f"El cliente {name} modificó su perfil.")
+        updated=con.execute("SELECT * FROM customers WHERE id=? AND tenant_id=?", (customer["id"], customer["tenant_id"])).fetchone()
+    if not updated: raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    return {"customer": row_dict(updated), "message":"Perfil actualizado correctamente"}
+
+
 @app.get("/api/public/{slug}/branches")
 def public_branches(slug: str):
     with connection() as con:
@@ -2727,6 +2932,34 @@ def public_service_status(slug: str, branch_id: int | None = None):
         require_public_module(con, tenant["id"], "public_page", branch_id)
         return service_status(con, tenant["id"], branch_id)
 
+
+@app.get("/api/public/me/bootstrap")
+def customer_bootstrap(customer=Depends(current_customer)):
+    """Carga inicial unificada: tema, permisos, tarjetas y premios en una sola conexión."""
+    with connection() as con:
+        tenant_id=customer["tenant_id"]; branch_id=customer.get("origin_branch_id")
+        require_public_module(con, tenant_id, "public_page", branch_id)
+        branding=branding_payload(con, tenant_id)
+        loyalty_on=module_enabled(con, tenant_id, "loyalty", branch_id)
+        cards=[]; rewards=[]
+        if loyalty_on:
+            rows=con.execute("""SELECT c.id,c.progress,c.cycle,p.id AS program_id,p.name AS program_name,
+                p.target_purchases,p.reward_name,p.progress_emoji,p.reward_stock,p.reward_display,
+                p.title_mode,p.stamps_mode,p.progress_mode,p.reward_mode,p.button_mode,
+                EXISTS(SELECT 1 FROM program_icons pi WHERE pi.program_id=p.id) AS has_custom_icon,
+                CASE WHEN p.reward_stock IS NULL THEN NULL ELSE GREATEST(p.reward_stock-(SELECT COUNT(*) FROM rewards r WHERE r.program_id=p.id),0) END AS rewards_remaining
+                FROM loyalty_cards c JOIN loyalty_programs p ON p.id=c.program_id
+                WHERE c.customer_id=? AND p.status='active' ORDER BY p.id""",(customer["id"],)).fetchall()
+            defaults=branding
+            for row in rows:
+                item=row_dict(row); item["icon_url"]=f"/api/public/loyalty-programs/{item['program_id']}/icon" if item.pop("has_custom_icon") else None
+                for part in ("title","stamps","progress","reward","button"):
+                    mode=item.pop(f"{part}_mode"); item[f"show_{part}"]=mode=="show" or (mode=="inherit" and defaults[f"show_campaign_{part}"])
+                cards.append(item)
+            rewards=[row_dict(r) for r in con.execute("""SELECT r.id,r.program_id,r.name,r.status,r.unlocked_at,r.claimed_at,p.name AS program_name
+                FROM rewards r JOIN loyalty_programs p ON p.id=r.program_id WHERE r.customer_id=? ORDER BY r.id DESC""",(customer["id"],)).fetchall()]
+        branding["enabled_modules"]=effective_modules(con,tenant_id,branch_id)
+    return {"branding":branding,"customer":customer,"cards":cards,"rewards":rewards,"enabled_modules":branding["enabled_modules"]}
 
 @app.get("/api/public/me/cards")
 def customer_cards(customer=Depends(current_customer)):
@@ -2765,16 +2998,30 @@ def customer_cards(customer=Depends(current_customer)):
     return {"customer": customer, "cards": card_items, "rewards": [row_dict(r) for r in rewards],
             "enabled_modules": enabled_modules}
 
+def raffle_expired(row):
+    """Return True when a raffle has reached its configured draw date."""
+    raw = row["draw_at"] if row is not None and "draw_at" in row.keys() else None
+    if not raw:
+        return False
+    try:
+        value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=ZoneInfo("America/Bogota"))
+        return datetime.now(timezone.utc) >= value.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
 @app.get("/api/public/me/raffles")
 def customer_raffles(customer=Depends(current_customer)):
     with connection() as con:
         if not module_enabled(con, customer["tenant_id"], "raffles", customer.get("origin_branch_id")):
             return []
-        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status='active' ORDER BY id DESC",(customer["tenant_id"],)).fetchall(); out=[]
+        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status IN ('active','drawn') ORDER BY id DESC",(customer["tenant_id"],)).fetchall(); out=[]
         for r in rows:
             mine=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND customer_phone=?",(r["id"],customer.get("phone"))).fetchone()["n"]
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
-            out.append({**row_dict(r),"my_tickets":mine,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
+            out.append({**row_dict(r),"expired":raffle_expired(r),"my_tickets":mine,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
         return out
 
 @app.post("/api/public/me/raffles/{raffle_id}/participate", status_code=201)
@@ -2784,6 +3031,8 @@ def participate_raffle(raffle_id:int, data: dict | None = None, request: Request
             raise HTTPException(404,"Rifas no disponibles")
         r=con.execute("SELECT * FROM raffles WHERE id=? AND tenant_id=? AND status='active'",(raffle_id,customer["tenant_id"])).fetchone()
         if not r: raise HTTPException(404,"Rifa no disponible")
+        if raffle_expired(r):
+            raise HTTPException(409,"La fecha de esta rifa ya terminó; ya no se pueden comprar boletas")
         # La cantidad permitida se aplica por compra. Las compras validadas no
         # bloquean una nueva compra del mismo cliente.
         current=0
@@ -2807,10 +3056,10 @@ def participate_raffle(raffle_id:int, data: dict | None = None, request: Request
         created=[];created_codes=[]
         for number in numbers:
             cur=con.execute("INSERT INTO raffle_tickets(raffle_id,ticket_number,customer_name,customer_phone,status) VALUES(?,?,?,?, 'pending')",(raffle_id,number,customer["name"],customer.get("phone"))); created.append(cur.lastrowid);created_codes.append(number)
-        expires=datetime.now(timezone.utc)+timedelta(seconds=300)
+        expires=datetime.now(timezone.utc)+timedelta(hours=24)
         code=new_operation_code(con)
         con.execute("INSERT INTO raffle_operation_tokens(tenant_id,customer_id,raffle_id,branch_id,code,ticket_ids_json,expires_at) VALUES(?,?,?,?,?,?,?)",(customer["tenant_id"],customer["id"],raffle_id,customer.get("origin_branch_id"),code,json.dumps(created),expires.isoformat()))
-        return {"raffle_id":raffle_id,"requested":qty,"status":"pending","message":"Participación pendiente. El negocio debe permitirla.","ticket_ids":created,"ticket_codes":created_codes,"code":code,"expires_in_seconds":300,"worker_url":worker_link(request,code) if request else None}
+        return {"raffle_id":raffle_id,"requested":qty,"status":"pending","message":"Participación pendiente. El negocio debe permitirla.","ticket_ids":created,"ticket_codes":created_codes,"code":code,"expires_in_seconds":86400,"worker_url":worker_link(request,code) if request else None}
 
 @app.get("/api/public/me/raffle-operations")
 def customer_raffle_operations(customer=Depends(current_customer)):
@@ -2823,7 +3072,7 @@ def customer_raffle_operations(customer=Depends(current_customer)):
             ids=json.loads(token["ticket_ids_json"] or "[]")
             marks=','.join('?'*len(ids)) or 'NULL'
             tickets=con.execute(f"SELECT ticket_number FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "expired" if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc) else "pending"
+            status_name="validated" if token["used_at"] else "rejected" if token["rejected_at"] else "pending"
             result.append({"id":token["id"],"raffle_id":token["raffle_id"],"raffle_name":token["raffle_name"],"code":token["code"],"status":status_name,"ticket_numbers":[x["ticket_number"] for x in tickets],"created_at":token["created_at"],"validated_at":token["validated_at"],"seller_name":token["validated_by_name"]})
         return result
 
@@ -2835,11 +3084,11 @@ def public_raffles_by_slug(slug: str):
         if not tenant: raise HTTPException(404,"Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
         if not module_enabled(con, tenant["id"], "raffles"): return []
-        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status='active' ORDER BY id DESC",(tenant["id"],)).fetchall()
+        rows=con.execute("SELECT * FROM raffles WHERE tenant_id=? AND status IN ('active','drawn') ORDER BY id DESC",(tenant["id"],)).fetchall()
         out=[]
         for r in rows:
             total=con.execute("SELECT COUNT(*) n FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner')",(r["id"],)).fetchone()["n"]
-            out.append({**row_dict(r),"my_tickets":0,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
+            out.append({**row_dict(r),"expired":raffle_expired(r),"my_tickets":0,"tickets_used":total,"tickets_available":None if not r["ticket_count"] else max(0,r["ticket_count"]-total)})
         return out
 
 @app.get("/api/public/me/roulette")
@@ -2872,7 +3121,7 @@ def customer_history(customer=Depends(current_customer)):
             """SELECT p.id, p.created_at, lp.name AS program_name, b.name AS branch_name
             FROM purchases p
             JOIN loyalty_programs lp ON lp.id=p.program_id
-            JOIN branches b ON b.id=p.branch_id
+            LEFT JOIN branches b ON b.id=p.branch_id
             WHERE p.customer_id=? AND p.tenant_id=?
             ORDER BY p.id DESC""",
             (customer["id"], customer["tenant_id"]),
@@ -2931,7 +3180,7 @@ def create_purchase_token(data: OperationTokenInput, request: Request, customer=
 def business_history(tenant_id: int | None = None, user=Depends(require("super_admin", "business_admin", "branch_admin"))):
     scope=tenant_scope(user,tenant_id)
     with connection() as con:
-        p=con.execute("SELECT p.created_at,c.name customer_name,lp.name program_name,b.name branch_name,u.name worker_name FROM purchases p JOIN customers c ON c.id=p.customer_id JOIN loyalty_programs lp ON lp.id=p.program_id JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id WHERE p.tenant_id=? ORDER BY p.id DESC LIMIT 200",(scope,)).fetchall()
+        p=con.execute("SELECT p.created_at,c.name customer_name,lp.name program_name,b.name branch_name,u.name worker_name FROM purchases p JOIN customers c ON c.id=p.customer_id JOIN loyalty_programs lp ON lp.id=p.program_id LEFT JOIN branches b ON b.id=p.branch_id JOIN users u ON u.id=p.worker_id WHERE p.tenant_id=? ORDER BY p.id DESC LIMIT 200",(scope,)).fetchall()
         r=con.execute("SELECT r.claimed_at,c.name customer_name,r.name reward_name,b.name branch_name,u.name worker_name FROM rewards r JOIN customers c ON c.id=r.customer_id LEFT JOIN branches b ON b.id=r.branch_id LEFT JOIN users u ON u.id=r.worker_id WHERE r.tenant_id=? AND r.status='used' ORDER BY r.id DESC LIMIT 200",(scope,)).fetchall()
     return {"purchases":[row_dict(x) for x in p],"rewards":[row_dict(x) for x in r]}
 
@@ -2967,14 +3216,24 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
     return {"status": "pending", "operation": token["operation_type"]}
 
 
+def validation_branch_for(user, token):
+    """Permite validar desde negocio general y respeta QR de sucursal."""
+    user_branch = user.get("branch_id")
+    token_branch = token["branch_id"]
+    if user_branch is not None and token_branch is not None and user_branch != token_branch:
+        raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+    return user_branch if user_branch is not None else token_branch
+
+
 @app.get("/api/operations/preview/{code}")
-def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))):
+def preview_operation(code: str, user=Depends(require("business_admin", "worker", "branch_admin"))):
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=422, detail="El código debe tener seis números")
     now = datetime.now(timezone.utc)
+    branch_id = user.get("branch_id")
     with connection() as con:
-        require_service_open(con, user["tenant_id"], user["branch_id"])
-        require_user_module(con, user, "loyalty", user["branch_id"])
+        require_service_open(con, user["tenant_id"], branch_id)
+        require_user_module(con, user, "loyalty", branch_id)
         require_worker_access(con, user, "validate_purchase")
         token = con.execute(
             """SELECT ot.*, c.name AS customer_name, c.phone AS customer_phone,
@@ -2987,12 +3246,25 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))
         ).fetchone()
         if not token:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
+        if user.get("branch_id") is not None and token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
             raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
         if token["used_at"]:
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
         if datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Este código venció. El cliente ya puede mostrar el nuevo código.")
+        profile_change = con.execute("""SELECT created_at,details FROM audit_logs
+            WHERE tenant_id=? AND entity_type='customer' AND entity_id=? AND action='profile_update'
+            ORDER BY id DESC LIMIT 1""", (user["tenant_id"], token["customer_id"])).fetchone()
+        profile_changed_recent = False
+        profile_change_details = {}
+        if profile_change:
+            changed_at = audit_datetime_utc(profile_change["created_at"])
+            if changed_at:
+                profile_changed_recent = datetime.now(timezone.utc) - changed_at <= timedelta(hours=24)
+            try:
+                profile_change_details = json.loads(profile_change["details"] or "{}")
+            except Exception:
+                profile_change_details = {}
         quantity = 1
         if token["operation_type"] == "reward_batch":
             quantity = con.execute(
@@ -3007,24 +3279,27 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))
             "reward_name": token["reward_name"],
             "quantity": quantity,
             "expires_at": token["expires_at"],
+            "profile_changed_at": profile_change["created_at"] if profile_change else None,
+            "profile_changed_recent": profile_changed_recent,
+            "profile_change_details": profile_change_details,
         }
 
 
 @app.post("/api/operations/validate-purchase")
-def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_purchase(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
+    # Un negocio general puede validar sin sucursal. Si el código pertenece
+    # a una sucursal concreta, la comprobación posterior exige coincidencia.
+    branch_id = user.get("branch_id")
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
-        require_service_open(con, user["tenant_id"], user["branch_id"])
-        require_user_module(con, user, "loyalty", user["branch_id"])
+        require_service_open(con, user["tenant_id"], branch_id)
+        require_user_module(con, user, "loyalty", branch_id)
         require_worker_access(con, user, "validate_purchase")
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type='purchase'", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         card = con.execute("SELECT * FROM loyalty_cards WHERE customer_id=? AND program_id=?", (token["customer_id"], token["program_id"])).fetchone()
@@ -3051,12 +3326,12 @@ def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker
             """INSERT INTO purchases
             (tenant_id, branch_id, customer_id, program_id, worker_id, operation_token_id)
             VALUES (?, ?, ?, ?, ?, ?)""",
-            (token["tenant_id"], user["branch_id"], token["customer_id"], token["program_id"], user["id"], token["id"]),
+            (token["tenant_id"], validation_branch, token["customer_id"], token["program_id"], user["id"], token["id"]),
         )
         audit(con, user, "validate", "purchase", cur.lastrowid, {"customer_id": token["customer_id"]})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], user["branch_id"], token["customer_id"], "purchase",
+            con, token["tenant_id"], branch_id, token["customer_id"], "purchase",
             "Nueva compra validada",
             f"{user['name']} registró una compra de {customer_row['name']} en {program['name']}.",
         )
@@ -3113,10 +3388,9 @@ def create_reward_batch_token(data: RewardBatchInput, request: Request, customer
 
 
 @app.post("/api/operations/validate-reward")
-def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_reward(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
     now = datetime.now(timezone.utc)
+    branch_id = user.get("branch_id")
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
         require_service_open(con, user["tenant_id"], user["branch_id"])
@@ -3125,8 +3399,7 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type IN ('reward','reward_batch')", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != user["branch_id"]:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
@@ -3145,13 +3418,13 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
             rewards = [reward]
         con.executemany(
             "UPDATE rewards SET status='used', claimed_at=?, branch_id=?, worker_id=? WHERE id=?",
-            [(now.isoformat(), user["branch_id"], user["id"], reward["id"]) for reward in rewards],
+            [(now.isoformat(), validation_branch, user["id"], reward["id"]) for reward in rewards],
         )
         con.execute("UPDATE operation_tokens SET used_at=? WHERE id=?", (now.isoformat(), token["id"]))
         audit(con, user, "validate", "reward", rewards[0]["id"], {"customer_id": rewards[0]["customer_id"], "quantity": len(rewards)})
         customer_row = con.execute("SELECT name FROM customers WHERE id=?", (token["customer_id"],)).fetchone()
         add_notification(
-            con, token["tenant_id"], user["branch_id"], token["customer_id"], "reward",
+            con, token["tenant_id"], branch_id, token["customer_id"], "reward",
             "Premio entregado",
             f"{user['name']} entregó {len(rewards)} premio(s) a {customer_row['name']}: {rewards[0]['name']}.",
         )
@@ -3609,25 +3882,18 @@ def notification_stream(after_id: int | None = None,
                         user=Depends(require("super_admin", "business_admin", "branch_admin"))):
     with connection() as con:
         require_user_module(con, user, "notifications")
-    query = """SELECT n.id,n.title,n.message,n.event_type,n.image_url,t.name business_name
-        FROM notifications n JOIN tenants t ON t.id=n.tenant_id WHERE 1=1"""
+    from_sql = "FROM notifications n JOIN tenants t ON t.id=n.tenant_id"
+    filters = " WHERE 1=1"
     params = []
     if user["role"] != "super_admin":
-        query += " AND n.tenant_id=?"
-        params.append(user["tenant_id"])
+        filters += " AND n.tenant_id=?"; params.append(user["tenant_id"])
     if user["role"] == "branch_admin":
-        query += " AND n.branch_id=?"
-        params.append(user["branch_id"])
+        filters += " AND n.branch_id=?"; params.append(user["branch_id"])
+    query = "SELECT n.id,n.title,n.message,n.event_type,n.image_url,t.name business_name " + from_sql + filters
     with connection() as con:
         if after_id is None:
-            latest = con.execute(
-                query.replace(
-                    "SELECT n.id,n.title,n.message,n.event_type,t.name business_name",
-                    "SELECT MAX(n.id) latest",
-                ),
-                params,
-            ).fetchone()["latest"] or 0
-            return {"last_id": latest, "items": []}
+            row = con.execute("SELECT COALESCE(MAX(n.id),0) AS latest " + from_sql + filters, params).fetchone()
+            return {"last_id": int(row[0] or 0), "items": []}
         rows = con.execute(query + " AND n.id>? ORDER BY n.id LIMIT 30", (*params, max(0, after_id))).fetchall()
     return {"last_id": rows[-1]["id"] if rows else after_id, "items": [row_dict(row) for row in rows]}
 
@@ -4270,6 +4536,21 @@ def update_raffle(raffle_id:int,data:RaffleInput,user=Depends(require("super_adm
         con.execute("UPDATE raffles SET name=?,description=?,image_url=?,ticket_price=?,ticket_count=?,draw_at=?,tickets_per_purchase=?,customer_ticket_limit=? WHERE id=?",(data.name,data.description,data.image_url,data.ticket_price,data.ticket_count,data.draw_at,data.tickets_per_purchase,data.customer_ticket_limit,raffle_id))
         return row_dict(con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone())
 
+@app.put("/api/raffles/{raffle_id}/winner-photo")
+def update_raffle_winner_photo(raffle_id:int,data:dict,user=Depends(require("super_admin","business_admin"))):
+    with connection() as con:
+        r=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
+        if not r: raise HTTPException(404,"Rifa no encontrada")
+        tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
+        url=str((data or {}).get("winner_photo_url") or "").strip() or None
+        if url and url.startswith("data:"):
+            if not re.fullmatch(r"data:image/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+", url) or len(url) > 1_500_000:
+                raise HTTPException(413, "La foto debe ser JPG, PNG o WebP y pesar máximo 2 MB")
+        elif url and not re.match(r"^https?://", url, re.I):
+            raise HTTPException(422, "La foto debe ser una imagen cargada o una URL pública https")
+        con.execute("UPDATE raffles SET winner_photo_url=? WHERE id=?",(url,raffle_id))
+        return row_dict(con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone())
+
 @app.delete("/api/raffles/{raffle_id}")
 def delete_raffle(raffle_id:int,user=Depends(require("super_admin","business_admin"))):
     with connection() as con:
@@ -4329,7 +4610,6 @@ def raffle_operation_row(con, code, user):
         raise HTTPException(403,"Este QR pertenece a otra sucursal")
     if token["used_at"]: raise HTTPException(409,"Esta participación ya fue permitida")
     if token["rejected_at"]: raise HTTPException(409,"Esta participación ya fue rechazada")
-    if datetime.fromisoformat(token["expires_at"]) < datetime.now(timezone.utc): raise HTTPException(409,"El código de la rifa venció")
     if user.get("role")!="super_admin":
         require_user_module(con,user,"raffles",user.get("branch_id"))
         require_worker_access(con, user, "validate_raffle")
@@ -4342,7 +4622,16 @@ def preview_raffle_operation(code:str,user=Depends(require("super_admin","busine
         ids=json.loads(token["ticket_ids_json"] or "[]")
         marks=','.join('?'*len(ids)) or 'NULL'
         tickets=con.execute(f"SELECT id,ticket_number,status FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-        return {"code":token["code"],"operation":"raffle","customer_name":token["customer_name"],"customer_phone":token["customer_phone"],"raffle_name":token["raffle_name"],"ticket_numbers":[x["ticket_number"] for x in tickets],"ticket_ids":[x["id"] for x in tickets],"expires_at":token["expires_at"]}
+        profile_change=con.execute("""SELECT created_at,details FROM audit_logs
+            WHERE tenant_id=? AND entity_type='customer' AND entity_id=? AND action='profile_update'
+            ORDER BY id DESC LIMIT 1""", (token["tenant_id"], token["customer_id"])).fetchone()
+        profile_changed_recent=False; profile_change_details={}
+        if profile_change:
+            changed_at=audit_datetime_utc(profile_change["created_at"])
+            if changed_at: profile_changed_recent=datetime.now(timezone.utc)-changed_at <= timedelta(hours=24)
+            try: profile_change_details=json.loads(profile_change["details"] or "{}")
+            except Exception: profile_change_details={}
+        return {"code":token["code"],"operation":"raffle","customer_name":token["customer_name"],"customer_phone":token["customer_phone"],"raffle_name":token["raffle_name"],"ticket_numbers":[x["ticket_number"] for x in tickets],"ticket_ids":[x["id"] for x in tickets],"expires_at":token["expires_at"],"profile_changed_at":profile_change["created_at"] if profile_change else None,"profile_changed_recent":profile_changed_recent,"profile_change_details":profile_change_details}
 
 @app.post("/api/raffle-operations/validate")
 def validate_raffle_operation(data:dict,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):
@@ -4383,6 +4672,24 @@ def public_raffle_numbers(slug:str,raffle_id:int):
         total=r["ticket_count"] or 0
         return {"total":total,"max_per_purchase":r["tickets_per_purchase"] or 1,"used":sorted(used),"pending":sorted(pending),"available":[] if not total else [n for n in range(1,total+1) if n not in used and n not in pending]}
 
+@app.get("/api/raffles/tickets/search")
+def search_raffle_tickets(q: str = "", tenant_id: int | None = None, user=Depends(require("super_admin", "business_admin", "branch_admin", "worker"))):
+    with connection() as con:
+        scope=None if user["role"]=="super_admin" and tenant_id is None else tenant_scope(user,tenant_id)
+        text=str(q or "").strip().upper()
+        base="SELECT t.*,r.name raffle_name,r.tenant_id FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id WHERE "
+        if text.isdigit():
+            # Un número corto se interpreta como número de boleta exacto: 5 no devuelve 50 ni 500.
+            if len(text)>=8:
+                sql=base+"(upper(t.ticket_number)=? OR t.customer_phone=?)"; args=[text,text]
+            else:
+                sql=base+"upper(t.ticket_number)=?"; args=[text]
+        else:
+            sql=base+"(upper(t.ticket_number) LIKE ? OR upper(t.customer_name) LIKE ? OR t.customer_phone LIKE ?)"; args=[f"%{text}%",f"%{text}%",f"%{text}%"]
+        if scope is not None: sql += " AND r.tenant_id=?"; args.append(scope)
+        rows=con.execute(sql+" ORDER BY t.id DESC LIMIT 100",args).fetchall()
+        return [row_dict(x) for x in rows]
+
 @app.get("/api/raffles/tickets/pending")
 def pending_raffle_tickets(tenant_id:int|None=None,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):
     # Consulta portable: SQLite y PostgreSQL almacenan ticket_ids_json como texto.
@@ -4412,15 +4719,36 @@ def reject_raffle_ticket(ticket_id:int,user=Depends(require("super_admin","busin
         if not row: raise HTTPException(404,"Participación no encontrada")
         tenant_scope(user,row["tenant_id"]);require_user_module(con,user,"raffles");con.execute("DELETE FROM raffle_tickets WHERE id=? AND status='pending'",(ticket_id,));return {"status":"rejected","ticket_id":ticket_id}
 
+@app.get("/api/raffles/{raffle_id}/draw-candidates")
+def raffle_draw_candidates(raffle_id:int,user=Depends(require("super_admin","business_admin"))):
+    with connection() as con:
+        raffle=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
+        if not raffle: raise HTTPException(404,"Rifa no encontrada")
+        tenant_scope(user,raffle["tenant_id"]); require_user_module(con,user,"raffles")
+        if raffle["status"]=="drawn": raise HTTPException(409,"Esta rifa ya fue sorteada")
+        # Evita operadores específicos de SQLite para que funcione igual en PostgreSQL/Render.
+        rows=con.execute("SELECT id,ticket_number,customer_name,status,created_at FROM raffle_tickets WHERE raffle_id=? AND status IN ('pending','reserved','winner') ORDER BY id",(raffle_id,)).fetchall()
+        rows=sorted(rows,key=lambda x:(0,int(x["ticket_number"])) if str(x["ticket_number"]).isdigit() else (1,str(x["ticket_number"])))
+        entries=[{"id":x["id"],"ticket_number":x["ticket_number"],"customer_name":x["customer_name"],"status":x["status"],"created_at":x["created_at"]} for x in rows]
+        candidates=[x for x in entries if x["status"]=="reserved"]
+        return {"raffle_id":raffle_id,"raffle_name":raffle["name"],"entries":entries,"candidates":[x for x in candidates],"count":len(candidates)}
+
 @app.post("/api/raffles/{raffle_id}/draw")
-def draw_raffle(raffle_id:int,user=Depends(require("super_admin","business_admin"))):
+def draw_raffle(raffle_id:int,data:dict|None=None,user=Depends(require("super_admin","business_admin"))):
     with connection() as con:
         r=con.execute("SELECT * FROM raffles WHERE id=?",(raffle_id,)).fetchone()
         if not r: raise HTTPException(404,"Rifa no encontrada")
-        require_user_module(con, user, "raffles")
+        tenant_scope(user,r["tenant_id"]); require_user_module(con,user,"raffles")
+        if r["status"]=="drawn": raise HTTPException(409,"Esta rifa ya fue sorteada")
         tickets=con.execute("SELECT * FROM raffle_tickets WHERE raffle_id=? AND status='reserved'",(raffle_id,)).fetchall()
-        if not tickets: raise HTTPException(422,"No hay boletas reservadas")
-        winner=tickets[secrets.randbelow(len(tickets))]; con.execute("UPDATE raffle_tickets SET status='winner' WHERE id=?",(winner['id'],)); con.execute("UPDATE raffles SET status='drawn',winner_ticket=?,winner_name=? WHERE id=?",(winner['ticket_number'],winner['customer_name'],raffle_id)); return {"raffle_id":raffle_id,"winner":row_dict(winner)}
+        if not tickets: raise HTTPException(422,"No hay boletas validadas para sortear")
+        requested=(data or {}).get("ticket_id")
+        winner=next((x for x in tickets if requested is not None and int(x["id"])==int(requested)),None) if requested is not None else tickets[secrets.randbelow(len(tickets))]
+        if not winner: raise HTTPException(409,"La boleta seleccionada ya no está habilitada para el sorteo")
+        changed=con.execute("UPDATE raffle_tickets SET status='winner' WHERE id=? AND status='reserved'",(winner["id"],))
+        if getattr(changed,"rowcount",1)==0: raise HTTPException(409,"La boleta ya cambió de estado. Actualiza la lista.")
+        con.execute("UPDATE raffles SET status='drawn',winner_ticket=?,winner_name=? WHERE id=?",(winner["ticket_number"],winner["customer_name"],raffle_id))
+        return {"raffle_id":raffle_id,"winner":row_dict(winner),"participants_count":len(tickets)}
 
 @app.get("/api/roulette")
 def list_roulette(tenant_id:int|None=None,user=Depends(require("super_admin","business_admin","branch_admin"))):

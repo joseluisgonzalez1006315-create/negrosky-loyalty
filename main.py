@@ -2929,7 +2929,7 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
 
 
 @app.get("/api/operations/preview/{code}")
-def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))):
+def preview_operation(code: str, user=Depends(require("business_admin", "worker", "branch_admin"))):
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=422, detail="El código debe tener seis números")
     now = datetime.now(timezone.utc)
@@ -2972,9 +2972,8 @@ def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))
 
 
 @app.post("/api/operations/validate-purchase")
-def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_purchase(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
+    branch_id = user.get("branch_id")
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
