@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.122")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.124")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1206,7 +1206,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.122", "build": "122", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.124", "build": "124", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -4044,7 +4044,7 @@ def collaboration_contacts(tenant_id: int | None = None, user=Depends(require("s
             FROM tenants t
             LEFT JOIN collaboration_contacts c ON c.tenant_id=t.id
             LEFT JOIN business_branding bb ON bb.tenant_id=t.id
-            WHERE t.status='active' AND t.deleted_at IS NULL AND t.id<>? AND COALESCE(c.visible,0)=1 ORDER BY t.LOWER(name)""", (scope,)).fetchall()
+            WHERE t.status='active' AND t.deleted_at IS NULL AND t.id<>? AND COALESCE(c.visible,0)=1 ORDER BY LOWER(t.name)""", (scope,)).fetchall()
     return [row_dict(row) for row in rows]
 
 @app.get("/api/collaborations/contact")
