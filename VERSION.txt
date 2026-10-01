@@ -1,1 +1,1 @@
-BUILD 100 - Carga estable en iPhone y orden de módulos
+BUILD 101 - Editor completo de rifas
