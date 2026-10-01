@@ -1,1 +1,1 @@
-BUILD 103 - Rifas visibles desde la primera carga y contenedor fijo
+BUILD 104 - Vista previa del cliente en editor de rifas

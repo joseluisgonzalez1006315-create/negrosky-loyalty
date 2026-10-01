@@ -274,3 +274,12 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 .raffle-edit-overlay{position:fixed;inset:0;z-index:100001;display:grid;place-items:center;padding:16px;background:#03050fcc;backdrop-filter:blur(8px)}
 .raffle-edit-dialog{position:relative;width:min(680px,100%);max-height:92vh;overflow:auto;padding:24px;border:1px solid #6d55cc;border-radius:20px;background:linear-gradient(145deg,#17172a,#241844 60%,#101827);box-shadow:0 24px 80px #000b;color:#fff}
 .raffle-edit-dialog h2{margin:4px 0 18px}.raffle-edit-dialog form{display:grid;gap:12px}.raffle-edit-dialog label{display:grid;gap:6px;text-align:left}.raffle-edit-dialog small{color:#cbd5e1}.raffle-edit-close{position:absolute;right:12px;top:10px;width:40px;height:40px;border:0;border-radius:50%;font-size:26px;background:#ffffff18;color:#fff}.raffle-edit-image-field{display:grid;gap:7px;padding:12px;border:1px solid #ffffff25;border-radius:14px;background:#ffffff08}.raffle-edit-preview{display:none;max-width:100%;max-height:220px;width:auto;height:auto;margin:4px auto;border-radius:12px;object-fit:contain;background:transparent}.raffle-edit-preview.visible{display:block}.raffle-edit-check{display:flex!important;align-items:center;gap:8px!important}.raffle-edit-check input{width:auto!important}.raffle-edit-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}.raffle-edit-message{min-height:20px;color:#fca5a5}
+/* Build 104: vista previa del cliente dentro del editor */
+.raffle-edit-live-preview{display:grid;gap:8px;margin-top:4px;padding:14px;border:1px solid #8b5cf655;border-radius:16px;background:#090914}
+.raffle-edit-live-preview>.eyebrow{margin:0;color:#c4b5fd}
+.raffle-edit-live-card{min-width:0;overflow:hidden}
+.raffle-edit-live-card .raffle-card{margin:0!important;background:var(--card,#14131f);border:1px solid #ffffff22;border-radius:16px;padding:16px;overflow:hidden}
+.raffle-edit-live-card .raffle-card-header{display:grid;gap:7px}.raffle-edit-live-card .raffle-card-header h2{margin:0}.raffle-edit-live-card .raffle-description{margin:0;line-height:1.45;overflow-wrap:anywhere}
+.raffle-edit-live-card .raffle-prize-image{display:block;width:auto;max-width:100%;height:auto;max-height:260px;margin:0 auto 14px;object-fit:contain;background:transparent;border-radius:12px}
+.raffle-edit-live-card .raffle-card button{width:100%;margin-top:10px}
+.raffle-edit-live-card .raffle-winner-history{display:grid;gap:6px;margin-top:14px;padding:14px;border-radius:14px;background:linear-gradient(135deg,#312e81,#14532d);border:1px solid #86efac}
