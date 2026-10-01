@@ -1,1 +1,1 @@
-BUILD 105 - Perfil como ventana y orden de módulos
+BUILD 106 - Orden visual de Rifas, Horarios y perfil

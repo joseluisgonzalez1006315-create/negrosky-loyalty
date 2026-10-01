@@ -288,3 +288,9 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 #customer-profile.profile-popup{position:fixed!important;inset:16px!important;z-index:100002!important;width:auto!important;max-width:680px!important;margin:auto!important;max-height:calc(100vh - 32px)!important;overflow:auto!important;padding:24px!important;background:var(--card,#14131f)!important;border:1px solid var(--line)!important;border-radius:20px!important;box-shadow:0 24px 80px #000b!important}
 #customer-profile .profile-popup-close{position:absolute;right:12px;top:10px;width:40px;height:40px;border:0;border-radius:50%;background:#ffffff18;color:inherit;font-size:28px;line-height:1}
 body:has(#customer-profile.profile-popup)::after{content:"";position:fixed;inset:0;z-index:100001;background:#03050fcc;backdrop-filter:blur(7px)}
+
+/* Build 106: perfil central limpio y acciones en el menú superior */
+#customer-profile-tools.profile-tools-popup{position:fixed;inset:50% auto auto 50%;transform:translate(-50%,-50%);z-index:100001;width:min(460px,calc(100vw - 28px));max-height:90vh;overflow:auto;padding:24px;border:1px solid var(--purple,#8b5cf6);border-radius:22px;background:var(--card,#151326);box-shadow:0 24px 80px #000b;color:var(--brand-text,#fff)}
+body.profile-tools-open::after{content:"";position:fixed;inset:0;z-index:100000;background:#0009;backdrop-filter:blur(3px)}
+#customer-profile-tools .profile-popup-close{position:absolute;right:12px;top:10px;border:0;border-radius:50%;width:36px;height:36px;font-size:24px;background:#ffffff18;color:inherit;cursor:pointer}
+#customer-quick-actions #quick-edit-profile,#customer-quick-actions #quick-logout-profile{border:1px solid #ffffff22;background:#ffffff0b}
