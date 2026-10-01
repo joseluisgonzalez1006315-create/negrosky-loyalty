@@ -1,1 +1,1 @@
-BUILD 118 - Página comercial con contacto editable y menos blanco
+BUILD 120 - Contacto de afiliación configurable desde el panel

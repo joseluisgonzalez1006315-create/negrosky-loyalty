@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.118")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.120")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -530,10 +530,41 @@ def ensure_general_business_purchases():
         con.execute("ALTER TABLE purchases ALTER COLUMN branch_id DROP NOT NULL")
 
 
+def ensure_platform_settings_table():
+    with connection() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS platform_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+
+def landing_contact_values(con):
+    rows=con.execute("SELECT key,value FROM platform_settings WHERE key IN ('landing_whatsapp','landing_facebook','landing_tiktok')").fetchall()
+    values={row["key"]: row["value"] for row in rows}
+    return {
+        "whatsapp": values.get("landing_whatsapp") or "https://wa.me/573001234567?text=Hola%20Negrosky%2C%20quiero%20conocer%20Loyalty",
+        "facebook": values.get("landing_facebook") or "https://www.facebook.com/",
+        "tiktok": values.get("landing_tiktok") or "https://www.tiktok.com/",
+    }
+
+
+def normalize_landing_link(value, kind):
+    value=str(value or '').strip()
+    if kind == 'whatsapp' and value and not value.lower().startswith(('http://','https://')):
+        digits=''.join(ch for ch in value if ch.isdigit())
+        if not digits: raise HTTPException(status_code=422, detail='Escribe un número de WhatsApp válido')
+        value='https://wa.me/'+digits
+    if value and not value.lower().startswith(('http://','https://')):
+        raise HTTPException(status_code=422, detail='Los enlaces deben comenzar por https://')
+    return value
+
+
 @app.on_event("startup")
 def startup():
     global _maintenance_task
     init_db()
+    ensure_platform_settings_table()
     ensure_raffle_winner_photo_column()
     sync_module_defaults()
     ensure_general_business_purchases()
@@ -614,6 +645,30 @@ def require(*roles):
             raise HTTPException(status_code=403, detail="No tiene permiso")
         return user
     return dependency
+
+
+@app.get("/api/public/landing-contact")
+def public_landing_contact():
+    init_db()
+    with connection() as con:
+        return landing_contact_values(con)
+
+
+@app.get("/api/platform-contact")
+def get_platform_contact(user=Depends(require("super_admin"))):
+    with connection() as con:
+        return landing_contact_values(con)
+
+
+@app.put("/api/platform-contact")
+def update_platform_contact(data: dict, user=Depends(require("super_admin"))):
+    values={key: normalize_landing_link(data.get(key), key) for key in ('whatsapp','facebook','tiktok')}
+    with connection() as con:
+        for key,value in values.items():
+            storage_key='landing_'+key
+            con.execute("""INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP""", (storage_key,value))
+    return values
 
 
 WORKER_ACCESS_PERMISSIONS = {
@@ -1151,7 +1206,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.118", "build": "118", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.120", "build": "120", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")

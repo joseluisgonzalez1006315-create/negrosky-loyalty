@@ -299,6 +299,12 @@ def init_db() -> None:
                 FOREIGN KEY (branch_id) REFERENCES branches(id)
             );
 
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS feature_modules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id INTEGER NOT NULL,
