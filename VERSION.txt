@@ -1,1 +1,1 @@
-BUILD 109 - Orden móvil y caché QR actualizados
+BUILD 110 - Enfoque continuo para escáner QR
