@@ -283,3 +283,8 @@ html.customer-session:not(.customer-ready) .mobile-shell{visibility:visible!impo
 .raffle-edit-live-card .raffle-prize-image{display:block;width:auto;max-width:100%;height:auto;max-height:260px;margin:0 auto 14px;object-fit:contain;background:transparent;border-radius:12px}
 .raffle-edit-live-card .raffle-card button{width:100%;margin-top:10px}
 .raffle-edit-live-card .raffle-winner-history{display:grid;gap:6px;margin-top:14px;padding:14px;border-radius:14px;background:linear-gradient(135deg,#312e81,#14532d);border:1px solid #86efac}
+
+/* Build 105: perfil accesible desde el menú superior */
+#customer-profile.profile-popup{position:fixed!important;inset:16px!important;z-index:100002!important;width:auto!important;max-width:680px!important;margin:auto!important;max-height:calc(100vh - 32px)!important;overflow:auto!important;padding:24px!important;background:var(--card,#14131f)!important;border:1px solid var(--line)!important;border-radius:20px!important;box-shadow:0 24px 80px #000b!important}
+#customer-profile .profile-popup-close{position:absolute;right:12px;top:10px;width:40px;height:40px;border:0;border-radius:50%;background:#ffffff18;color:inherit;font-size:28px;line-height:1}
+body:has(#customer-profile.profile-popup)::after{content:"";position:fixed;inset:0;z-index:100001;background:#03050fcc;backdrop-filter:blur(7px)}

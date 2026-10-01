@@ -1,1 +1,1 @@
-BUILD 104 - Vista previa del cliente en editor de rifas
+BUILD 105 - Perfil como ventana y orden de módulos
