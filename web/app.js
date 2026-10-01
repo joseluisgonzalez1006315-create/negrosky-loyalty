@@ -221,13 +221,23 @@ async function setAppointmentStatus(id,status){if(!status)return;try{await api('
 $('appointment-tenant').onchange=()=>{calendarCursor=null;calendarSelected=null;loadAppointmentBranches()};$('appointment-branch').onchange=()=>Promise.all([loadAppointmentServices(),loadAppointments()]);$('refresh-appointments').onclick=loadAppointments;
 
 let adminNotificationItems=[];
-function notificationDateValue(value){if(!value)return null;const raw=String(value).trim();const normalized=raw.includes('T')?raw:raw.replace(' ','T');const d=new Date(normalized.endsWith('Z')?normalized:normalized+'Z');return Number.isNaN(d.getTime())?null:d}
+function notificationDateValue(value){
+ if(value===null||value===undefined||value==='')return null;
+ if(value instanceof Date)return Number.isNaN(value.getTime())?null:value;
+ if(typeof value==='number'){const ms=value<100000000000?value*1000:value;const d=new Date(ms);return Number.isNaN(d.getTime())?null:d}
+ const raw=String(value).trim();
+ if(!raw)return null;
+ const normalized=raw.includes('T')?raw:raw.replace(' ','T');
+ const candidates=[normalized,normalized.endsWith('Z')?normalized:normalized+'Z',raw.replace(' ','T').replace(/\.\d{1,6}/,'')];
+ for(const candidate of candidates){const d=new Date(candidate);if(!Number.isNaN(d.getTime()))return d}
+ return null
+}
 function renderAdminNotifications(){
  const period=$('notification-period')?.value||'all',from=$('notification-date-from')?.value||'',to=$('notification-date-to')?.value||'';const now=Date.now();
  const fromMs=from?new Date(from+'T00:00:00').getTime():null;const toMs=to?new Date(to+'T23:59:59').getTime():null;
- const items=adminNotificationItems.filter(x=>{const d=notificationDateValue(x.created_at),t=d?.getTime();if(!t)return true;if(period==='24h')return t>=now-24*60*60*1000;if(period==='date')return fromMs===null|| (t>=fromMs&&t<=new Date(from+'T23:59:59').getTime());if(period==='range')return fromMs===null|| (t>=fromMs&&(toMs===null||t<=toMs));return true});
+ const items=adminNotificationItems.filter(x=>{const d=notificationDateValue(x.created_at||x.createdAt||x.created||x.date),t=d?.getTime();if(!t)return true;if(period==='24h')return t>=now-24*60*60*1000;if(period==='date')return fromMs===null|| (t>=fromMs&&t<=new Date(from+'T23:59:59').getTime());if(period==='range')return fromMs===null|| (t>=fromMs&&(toMs===null||t<=toMs));return true});
  const summary=$('notification-filter-summary');if(summary)summary.textContent=`Mostrando ${items.length} de ${adminNotificationItems.length} notificación(es).`;
- $('notification-list').innerHTML=items.length?items.map(x=>{const d=notificationDateValue(x.created_at);const dateText=d?d.toLocaleString('es-CO',{dateStyle:'medium',timeStyle:'short'}):'Fecha no disponible';return `<article class="notification-card ${x.read_at?'read':'unread'}"><div><span>${x.event_type==='purchase'?'🛒':x.event_type==='reward'?'🎁':x.event_type==='broadcast'?'📣':x.event_type==='profile_update'?'✏️':'📅'}</span><div><b>${ES.escape(x.title)}</b><p>${ES.escape(x.message)}</p>${x.image_url?`<img class="notification-card-image" src="${ES.escape(x.image_url)}" alt="Imagen de la notificación">`:''}<small>${dateText}${x.branch_name?' · '+ES.escape(x.branch_name):''}</small></div></div></article>`}).join(''):'<p class="muted">No hay notificaciones para el periodo seleccionado.</p>';
+ $('notification-list').innerHTML=items.length?items.map(x=>{const d=notificationDateValue(x.created_at||x.createdAt||x.created||x.date);const dateText=d?d.toLocaleString('es-CO',{dateStyle:'medium',timeStyle:'short'}):'Fecha no disponible';return `<article class="notification-card ${x.read_at?'read':'unread'}"><div><span>${x.event_type==='purchase'?'🛒':x.event_type==='reward'?'🎁':x.event_type==='broadcast'?'📣':x.event_type==='profile_update'?'✏️':'📅'}</span><div><b>${ES.escape(x.title)}</b><p>${ES.escape(x.message)}</p>${x.image_url?`<img class="notification-card-image" src="${ES.escape(x.image_url)}" alt="Imagen de la notificación">`:''}<small>${dateText}${x.branch_name?' · '+ES.escape(x.branch_name):''}</small></div></div></article>`}).join(''):'<p class="muted">No hay notificaciones para el periodo seleccionado.</p>';
 }
 async function loadNotifications(){
  if(!tenants.length)return;const tenantId=+$('notification-tenant').value||tenants.find(x=>x.status==='active')?.id;if(!tenantId)return;

@@ -12,7 +12,7 @@ import shutil
 import socket
 import zipfile
 from math import ceil
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import ipaddress
 from pathlib import Path
 from urllib.parse import urlparse
@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.139")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.140")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -60,7 +60,14 @@ async def no_browser_cache(request, call_next):
 
 
 def row_dict(row):
-    return dict(row) if row else None
+    """Convert database rows to JSON-safe dictionaries with ISO dates."""
+    if not row:
+        return None
+    data = dict(row)
+    for key, value in data.items():
+        if isinstance(value, (datetime, date)):
+            data[key] = value.isoformat()
+    return data
 
 
 def optimize_uploaded_image(content: bytes, max_side: int, quality: int = 82):
@@ -1206,7 +1213,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.139", "build": "139", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.140", "build": "140", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
