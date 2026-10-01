@@ -2521,6 +2521,16 @@ def customer_profile(customer_id: int,
         raffle_tickets = con.execute("""SELECT t.id,t.ticket_number,t.status,t.created_at,r.name AS raffle_name
             FROM raffle_tickets t JOIN raffles r ON r.id=t.raffle_id
             WHERE t.customer_phone=? AND r.tenant_id=? ORDER BY t.id DESC LIMIT 200""", (customer["phone"],customer["tenant_id"])).fetchall()
+        profile_changes = con.execute("""SELECT a.id,a.action,a.details,a.created_at,a.branch_id,b.name AS branch_name
+            FROM audit_logs a LEFT JOIN branches b ON b.id=a.branch_id
+            WHERE a.tenant_id=? AND a.entity_type='customer' AND a.entity_id=?
+              AND a.action='profile_update' ORDER BY a.id DESC LIMIT 100""", (customer["tenant_id"], customer_id)).fetchall()
+    changes=[]
+    for row in profile_changes:
+        item=row_dict(row)
+        try:item["details"]=json.loads(item.get("details") or "{}")
+        except Exception:pass
+        changes.append(item)
     return {
         "customer": row_dict(customer),
         "cards": [row_dict(row) for row in cards],
@@ -2528,6 +2538,7 @@ def customer_profile(customer_id: int,
         "rewards": [row_dict(row) for row in rewards],
         "raffle_operations": [row_dict(row) for row in raffle_operations],
         "raffle_tickets": [row_dict(row) for row in raffle_tickets],
+        "profile_changes": changes,
     }
 
 
@@ -2809,9 +2820,19 @@ def update_customer_profile(data: CustomerProfileInput, customer=Depends(current
     phone = "".join(ch for ch in data.phone if ch.isdigit())
     name = data.name.strip()
     with connection() as con:
+        before=con.execute("SELECT * FROM customers WHERE id=? AND tenant_id=?", (customer["id"], customer["tenant_id"])).fetchone()
         duplicate = con.execute("SELECT id FROM customers WHERE tenant_id=? AND phone=? AND id<>? AND status!='merged'", (customer["tenant_id"], phone, customer["id"])).fetchone()
         if duplicate: raise HTTPException(status_code=409, detail="Ese celular ya pertenece a otro cliente")
+        changed={}
+        for field,new_value in {"name":name,"phone":phone,"birth_date":data.birth_date,"birthday_consent":int(bool(data.birthday_consent))}.items():
+            old_value=before[field] if before else None
+            if str(old_value or '') != str(new_value or ''): changed[field]={"before":old_value,"after":new_value}
         con.execute("UPDATE customers SET name=?, search_key=?, phone=?, birth_date=?, birthday_consent=? WHERE id=? AND tenant_id=? AND status='active'", (name, normalize_search(name), phone, data.birth_date, int(bool(data.birthday_consent)), customer["id"], customer["tenant_id"]))
+        if changed:
+            details={"actor_type":"customer","actor_name":name,"actor_phone":phone,"changed":changed}
+            con.execute("""INSERT INTO audit_logs (tenant_id,branch_id,user_id,action,entity_type,entity_id,details)
+                VALUES (?,?,?,?,?,?,?)""", (customer["tenant_id"],customer.get("origin_branch_id"),None,"profile_update","customer",customer["id"],json.dumps(details,ensure_ascii=False)))
+            add_notification(con,customer["tenant_id"],customer.get("origin_branch_id"),customer["id"],"profile_update","Perfil actualizado",f"El cliente {name} modificó su perfil.")
         updated=con.execute("SELECT * FROM customers WHERE id=? AND tenant_id=?", (customer["id"], customer["tenant_id"])).fetchone()
     if not updated: raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return {"customer": row_dict(updated), "message":"Perfil actualizado correctamente"}

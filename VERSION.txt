@@ -1,1 +1,1 @@
-BUILD 110 - Enfoque continuo para escáner QR
+BUILD 111 - Historial de perfil y notificaciones administrativas
