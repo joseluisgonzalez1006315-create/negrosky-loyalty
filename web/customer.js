@@ -118,7 +118,7 @@ function showCustomerLoadingShell(){
   $('identify-box')?.classList.add('hidden');
   home.classList.remove('hidden');
   const hello=$('hello');
-  if(hello&&!hello.textContent)hello.textContent='Cargando tu información…';
+  if(hello&&!hello.textContent)hello.textContent='¡Hola!';
   const cards=$('cards');
   if(cards&&!cards.children.length)cards.innerHTML='<div class="customer-loading-card" aria-busy="true"><span></span><span></span><span></span></div>';
   const rewards=$('rewards');
