@@ -330,3 +330,26 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.dashboard{width:100%;max-
   .table-wrap{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .raffle-candidates-panel{grid-column:1/-1!important;min-width:0;overflow:hidden}
 }
+
+/* BUILD 134 · Iconos visuales para localizar rápidamente cada módulo */
+@media(min-width:1101px){
+  .dashboard>.tabs button{display:flex;align-items:center;gap:10px}
+  .dashboard>.tabs button::before{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:7px;background:#ffffff12;font-size:13px;flex:none}
+  .dashboard>.tabs button[data-view="overview"]::before{content:'⌂'}
+  .dashboard>.tabs button[data-view="business"]::before{content:'🏪'}
+  .dashboard>.tabs button[data-view="branding"]::before{content:'🎨'}
+  .dashboard>.tabs button[data-view="branches"]::before{content:'📍'}
+  .dashboard>.tabs button[data-view="service"]::before{content:'🕒'}
+  .dashboard>.tabs button[data-view="modules"]::before{content:'🧩'}
+  .dashboard>.tabs button[data-view="users"]::before{content:'👥'}
+  .dashboard>.tabs button[data-view="security"]::before{content:'🔐'}
+  .dashboard>.tabs button[data-view="loyalty"]::before{content:'⭐'}
+  .dashboard>.tabs button[data-view="appointments"]::before{content:'📅'}
+  .dashboard>.tabs button[data-view="time-sales"]::before{content:'⏱'}
+  .dashboard>.tabs button[data-view="notifications"]::before{content:'🔔'}
+  .dashboard>.tabs button[data-view="customers"]::before{content:'👤'}
+  .dashboard>.tabs button[data-view="history"]::before{content:'🧾'}
+  .dashboard>.tabs button[data-view="system"]::before{content:'⚙'}
+  .dashboard>.tabs button[data-view="raffles"]::before{content:'🎟'}
+  .dashboard>.tabs button[data-view="roulette"]::before{content:'🎡'}
+}
