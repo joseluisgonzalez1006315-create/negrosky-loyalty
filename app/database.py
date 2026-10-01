@@ -7,8 +7,6 @@ from contextlib import contextmanager
 from pathlib import Path
 import re
 
-_POSTGRES_POOL = None
-
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "negrosky_v2.db"
 
@@ -30,32 +28,6 @@ def postgres_url() -> str | None:
 
 def using_postgres() -> bool:
     return bool(postgres_url())
-
-
-def _postgres_row_factory(cursor):
-    def make_row(values):
-        columns = [item.name for item in cursor.description]
-        return _CompatRow(columns, values)
-    return make_row
-
-
-def _postgres_pool():
-    """Reuse a small pool instead of opening a Supabase connection per request."""
-    global _POSTGRES_POOL
-    if _POSTGRES_POOL is None:
-        try:
-            from psycopg_pool import ConnectionPool
-        except ImportError as exc:
-            raise RuntimeError("Falta instalar psycopg[binary,pool] para usar PostgreSQL") from exc
-        _POSTGRES_POOL = ConnectionPool(
-            conninfo=postgres_url(),
-            min_size=1,
-            max_size=8,
-            kwargs={"row_factory": _postgres_row_factory},
-            timeout=20,
-            open=True,
-        )
-    return _POSTGRES_POOL
 
 
 class _CompatRow(dict):
@@ -160,16 +132,27 @@ class _PostgresConnection:
 @contextmanager
 def connection():
     if using_postgres():
-        pool = _postgres_pool()
-        # pool.connection() returns the connection to the pool on exit.
-        with pool.connection() as con:
-            wrapped = _PostgresConnection(con)
-            try:
-                yield wrapped
-                wrapped.commit()
-            except Exception:
-                wrapped.rollback()
-                raise
+        try:
+            import psycopg
+        except ImportError as exc:
+            raise RuntimeError("Falta instalar psycopg[binary] para usar PostgreSQL") from exc
+
+        def row_factory(cursor):
+            def make_row(values):
+                columns = [item.name for item in cursor.description]
+                return _CompatRow(columns, values)
+            return make_row
+
+        con = psycopg.connect(postgres_url(), row_factory=row_factory)
+        wrapped = _PostgresConnection(con)
+        try:
+            yield wrapped
+            wrapped.commit()
+        except Exception:
+            wrapped.rollback()
+            raise
+        finally:
+            wrapped.close()
         return
 
     path = database_path()
@@ -297,12 +280,6 @@ def init_db() -> None:
                 UNIQUE (tenant_id, branch_id, weekday),
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id),
                 FOREIGN KEY (branch_id) REFERENCES branches(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS platform_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL DEFAULT '',
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS feature_modules (
@@ -829,9 +806,6 @@ def init_db() -> None:
                 con.execute(f"ALTER TABLE collaborations ADD COLUMN {name} {definition}")
         customer_columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
         raffle_columns = {row[1] for row in con.execute("PRAGMA table_info(raffles)")}
-        if "winner_photo_url" not in raffle_columns:
-            con.execute("ALTER TABLE raffles ADD COLUMN winner_photo_url TEXT")
-
         raffle_operation_columns = {row[1] for row in con.execute("PRAGMA table_info(raffle_operation_tokens)")}
         if "validated_by_name" not in raffle_operation_columns:
             con.execute("ALTER TABLE raffle_operation_tokens ADD COLUMN validated_by_name TEXT")

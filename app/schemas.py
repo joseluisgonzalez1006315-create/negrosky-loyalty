@@ -248,13 +248,6 @@ class ResetPlatformInput(BaseModel):
     confirmation: str
 
 
-class CustomerProfileInput(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    phone: str = Field(pattern=r"^[0-9]{10}$")
-    birth_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
-    birthday_consent: bool = False
-
-
 class CustomerIdentifyInput(BaseModel):
     # El celular identifica al cliente; el nombre puede omitirse.
     name: str | None = Field(default=None, max_length=120)
