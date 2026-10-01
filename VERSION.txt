@@ -1,1 +1,1 @@
-BUILD 107 - Escáner QR compatible con móviles
+BUILD 108 - Orden de rifas y lectura QR completa

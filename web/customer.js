@@ -39,6 +39,8 @@ function applyCustomerModuleOrder(b){
     const [key,value,start]=row.split(':');
     if(key in widths&&Number(value)){widths[key]=Number(value);if(Number(start))positions[key]=Number(start)}
   }
+  const savedOrder=String(b['module_order_'+device]||'').split(',').filter(key=>map[key]);
+  const moduleKeys=['contact','profile','campaigns','rewards','schedule','appointments','raffles'];const order=[...savedOrder,...moduleKeys.filter(key=>map[key]&&!savedOrder.includes(key))];
   for(const [key,el] of Object.entries(map))if(el){
     const span=Math.max(3,Math.min(12,Math.round(widths[key]/100*12)));
     const start=Math.max(1,Math.min(13-span,positions[key]||1));
@@ -46,9 +48,9 @@ function applyCustomerModuleOrder(b){
     el.classList.toggle('module-compact',widths[key]<=50);
     el.style.setProperty('--module-span',span);
     el.style.setProperty('--module-start',start);
-    el.style.setProperty('--module-order',String(String(b['module_order_'+device]||'').split(',').indexOf(key)+1));
+    el.style.setProperty('--module-order',String(order.indexOf(key)+1));
   }
-  for(const key of String(b['module_order_'+device]||'').split(','))if(map[key])home.appendChild(map[key]);
+  for(const key of order)if(map[key])home.appendChild(map[key]);
 }
 function renderPublicBusinessInfo(b){
   const section=$('public-business-info'),buttons=$('public-contact-buttons');buttons.replaceChildren();
