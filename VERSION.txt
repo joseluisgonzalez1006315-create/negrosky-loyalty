@@ -1,1 +1,1 @@
-BUILD 113 - Notificaciones administrativas con sonido y saludo del cliente
+BUILD 114 - Alerta visible de cambios recientes del cliente al validar

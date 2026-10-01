@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.113")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.114")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -464,6 +464,20 @@ def _restore_backup_path(source: Path):
             return {"restored_files": restored_files, **restored}
     except zipfile.BadZipFile:
         raise HTTPException(status_code=409, detail="El archivo ZIP está dañado")
+
+
+def audit_datetime_utc(value):
+    """Normaliza fechas de auditoría SQLite/PostgreSQL a UTC con zona horaria."""
+    if not value:
+        return None
+    try:
+        text = str(value).strip().replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
 
 
 def audit(con, user, action, entity_type, entity_id=None, details=None):
@@ -1132,7 +1146,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.113", "build": "113", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.114", "build": "114", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3182,9 +3196,15 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
             WHERE tenant_id=? AND entity_type='customer' AND entity_id=? AND action='profile_update'
             ORDER BY id DESC LIMIT 1""", (user["tenant_id"], token["customer_id"])).fetchone()
         profile_changed_recent = False
+        profile_change_details = {}
         if profile_change:
-            try: profile_changed_recent = datetime.now(timezone.utc) - datetime.fromisoformat(str(profile_change["created_at"]).replace('Z','+00:00')) <= timedelta(hours=24)
-            except Exception: pass
+            changed_at = audit_datetime_utc(profile_change["created_at"])
+            if changed_at:
+                profile_changed_recent = datetime.now(timezone.utc) - changed_at <= timedelta(hours=24)
+            try:
+                profile_change_details = json.loads(profile_change["details"] or "{}")
+            except Exception:
+                profile_change_details = {}
         quantity = 1
         if token["operation_type"] == "reward_batch":
             quantity = con.execute(
@@ -3201,6 +3221,7 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
             "expires_at": token["expires_at"],
             "profile_changed_at": profile_change["created_at"] if profile_change else None,
             "profile_changed_recent": profile_changed_recent,
+            "profile_change_details": profile_change_details,
         }
 
 
@@ -4541,7 +4562,16 @@ def preview_raffle_operation(code:str,user=Depends(require("super_admin","busine
         ids=json.loads(token["ticket_ids_json"] or "[]")
         marks=','.join('?'*len(ids)) or 'NULL'
         tickets=con.execute(f"SELECT id,ticket_number,status FROM raffle_tickets WHERE id IN ({marks}) ORDER BY CAST(ticket_number AS INTEGER),id",ids).fetchall() if ids else []
-        return {"code":token["code"],"operation":"raffle","customer_name":token["customer_name"],"customer_phone":token["customer_phone"],"raffle_name":token["raffle_name"],"ticket_numbers":[x["ticket_number"] for x in tickets],"ticket_ids":[x["id"] for x in tickets],"expires_at":token["expires_at"]}
+        profile_change=con.execute("""SELECT created_at,details FROM audit_logs
+            WHERE tenant_id=? AND entity_type='customer' AND entity_id=? AND action='profile_update'
+            ORDER BY id DESC LIMIT 1""", (token["tenant_id"], token["customer_id"])).fetchone()
+        profile_changed_recent=False; profile_change_details={}
+        if profile_change:
+            changed_at=audit_datetime_utc(profile_change["created_at"])
+            if changed_at: profile_changed_recent=datetime.now(timezone.utc)-changed_at <= timedelta(hours=24)
+            try: profile_change_details=json.loads(profile_change["details"] or "{}")
+            except Exception: profile_change_details={}
+        return {"code":token["code"],"operation":"raffle","customer_name":token["customer_name"],"customer_phone":token["customer_phone"],"raffle_name":token["raffle_name"],"ticket_numbers":[x["ticket_number"] for x in tickets],"ticket_ids":[x["id"] for x in tickets],"expires_at":token["expires_at"],"profile_changed_at":profile_change["created_at"] if profile_change else None,"profile_changed_recent":profile_changed_recent,"profile_change_details":profile_change_details}
 
 @app.post("/api/raffle-operations/validate")
 def validate_raffle_operation(data:dict,user=Depends(require("super_admin","business_admin","branch_admin","worker"))):
