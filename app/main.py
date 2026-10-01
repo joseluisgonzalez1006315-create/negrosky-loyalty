@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.145")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.146")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1213,7 +1213,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.145", "build": "145", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.146", "build": "146", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -3971,7 +3971,7 @@ def list_notifications(tenant_id: int | None = None,
         except Exception:
             # No bloquear el panel si una base antigua no permite actualizar registros históricos.
             pass
-        query = """SELECT n.*,b.name branch_name,c.name customer_name FROM notifications n
+        query = """SELECT n.*,CURRENT_TIMESTAMP AS notification_timestamp,b.name branch_name,c.name customer_name FROM notifications n
         LEFT JOIN branches b ON b.id=n.branch_id LEFT JOIN customers c ON c.id=n.customer_id
         WHERE n.tenant_id=?"""
         params = [scope]
