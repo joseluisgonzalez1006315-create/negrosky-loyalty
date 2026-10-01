@@ -294,3 +294,9 @@ body:has(#customer-profile.profile-popup)::after{content:"";position:fixed;inset
 body.profile-tools-open::after{content:"";position:fixed;inset:0;z-index:100000;background:#0009;backdrop-filter:blur(3px)}
 #customer-profile-tools .profile-popup-close{position:absolute;right:12px;top:10px;border:0;border-radius:50%;width:36px;height:36px;font-size:24px;background:#ffffff18;color:inherit;cursor:pointer}
 #customer-quick-actions #quick-edit-profile,#customer-quick-actions #quick-logout-profile{border:1px solid #ffffff22;background:#ffffff0b}
+
+/* Build 112: aviso visible para validar operaciones después de cambios de perfil */
+.profile-change-warning{display:grid;gap:3px;margin:12px 0;padding:12px 14px;border:1px solid #64748b;border-radius:13px;background:#172033;color:#dbeafe;text-align:left}
+.profile-change-warning.recent{border-color:#f59e0b;background:#3a2508;color:#fef3c7}
+.profile-change-warning b{font-size:14px}.profile-change-warning small{font-weight:800}.profile-change-warning span{font-size:12px;opacity:.9}
+.profile-change-item{border-left-color:#f59e0b!important}.profile-change-item ul{margin:6px 0 0;padding-left:20px}

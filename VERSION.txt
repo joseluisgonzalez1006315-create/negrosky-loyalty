@@ -1,1 +1,1 @@
-BUILD 111 - Historial de perfil y notificaciones administrativas
+BUILD 112 - Validación con alerta de cambios de perfil

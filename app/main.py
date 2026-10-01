@@ -3178,6 +3178,13 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
             raise HTTPException(status_code=409, detail="Este código ya fue utilizado")
         if datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Este código venció. El cliente ya puede mostrar el nuevo código.")
+        profile_change = con.execute("""SELECT created_at,details FROM audit_logs
+            WHERE tenant_id=? AND entity_type='customer' AND entity_id=? AND action='profile_update'
+            ORDER BY id DESC LIMIT 1""", (user["tenant_id"], token["customer_id"])).fetchone()
+        profile_changed_recent = False
+        if profile_change:
+            try: profile_changed_recent = datetime.now(timezone.utc) - datetime.fromisoformat(str(profile_change["created_at"]).replace('Z','+00:00')) <= timedelta(hours=24)
+            except Exception: pass
         quantity = 1
         if token["operation_type"] == "reward_batch":
             quantity = con.execute(
@@ -3192,6 +3199,8 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
             "reward_name": token["reward_name"],
             "quantity": quantity,
             "expires_at": token["expires_at"],
+            "profile_changed_at": profile_change["created_at"] if profile_change else None,
+            "profile_changed_recent": profile_changed_recent,
         }
 
 
@@ -3298,10 +3307,9 @@ def create_reward_batch_token(data: RewardBatchInput, request: Request, customer
 
 
 @app.post("/api/operations/validate-reward")
-def validate_reward(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
-    if not user["branch_id"]:
-        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
+def validate_reward(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
     now = datetime.now(timezone.utc)
+    branch_id = user.get("branch_id")
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
         require_service_open(con, user["tenant_id"], user["branch_id"])
@@ -3310,8 +3318,7 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
         token = con.execute("SELECT * FROM operation_tokens WHERE code=? AND operation_type IN ('reward','reward_batch')", (data.code,)).fetchone()
         if not token or token["tenant_id"] != user["tenant_id"]:
             raise HTTPException(status_code=404, detail="Código no válido para este negocio")
-        if token["branch_id"] is not None and token["branch_id"] != branch_id:
-            raise HTTPException(status_code=403, detail="Este QR pertenece a otra sucursal")
+        validation_branch = validation_branch_for(user, token)
         if token["used_at"] or datetime.fromisoformat(token["expires_at"]) < now:
             raise HTTPException(status_code=409, detail="Código utilizado o vencido")
         if token["operation_type"] == "reward_batch":
@@ -3330,7 +3337,7 @@ def validate_reward(data: ValidateOperationInput, user=Depends(require("worker",
             rewards = [reward]
         con.executemany(
             "UPDATE rewards SET status='used', claimed_at=?, branch_id=?, worker_id=? WHERE id=?",
-            [(now.isoformat(), user["branch_id"], user["id"], reward["id"]) for reward in rewards],
+            [(now.isoformat(), validation_branch, user["id"], reward["id"]) for reward in rewards],
         )
         con.execute("UPDATE operation_tokens SET used_at=? WHERE id=?", (now.isoformat(), token["id"]))
         audit(con, user, "validate", "reward", rewards[0]["id"], {"customer_id": rewards[0]["customer_id"], "quantity": len(rewards)})
