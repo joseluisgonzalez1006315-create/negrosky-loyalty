@@ -1,1 +1,1 @@
-BUILD 102 - Rifas visibles desde la primera carga
+BUILD 103 - Rifas visibles desde la primera carga y contenedor fijo
