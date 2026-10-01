@@ -98,22 +98,19 @@ $('scan-button').onclick=async()=>{
     video.srcObject=activeCameraStream; video.setAttribute('playsinline',''); video.setAttribute('webkit-playsinline',''); video.muted=true;
     await video.play(); status.textContent='Buscando código…';
     const scan=async()=>{
-      if(!activeCameraStream||shell.classList.contains('hidden'))return;
+      if(!activeCameraStream||shell.classList.contains('hidden')||scan.busy)return;
+      scan.busy=true;let found=null;
       try{
         if('BarcodeDetector' in window){
-          if(!scan.detector){scan.detector=new BarcodeDetector({formats:['qr_code']})}
-          const codes=await scan.detector.detect(video);
-          if(codes.length){cameraFound(codes[0].rawValue);return}
-        }else if(window.jsQR&&video.videoWidth){
-          if(!scan.canvas)scan.canvas=document.createElement('canvas');
-          if(!scan.ctx)scan.ctx=scan.canvas.getContext('2d',{willReadFrequently:true});
-          const scale=Math.min(1,1280/video.videoWidth);scan.canvas.width=Math.max(1,Math.round(video.videoWidth*scale));scan.canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
-          scan.ctx.drawImage(video,0,0,scan.canvas.width,scan.canvas.height);
-          const image=scan.ctx.getImageData(0,0,scan.canvas.width,scan.canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});
-          if(code?.data){cameraFound(code.data);return}
+          if(!scan.detector)scan.detector=new BarcodeDetector({formats:['qr_code']});
+          const codes=await scan.detector.detect(video);if(codes[0]?.rawValue)found=codes[0].rawValue;
         }
       }catch(e){}
-      cameraFrameId=requestAnimationFrame(scan);
+      // BarcodeDetector falla silenciosamente en algunos Android/iPhone; jsQR queda como respaldo siempre.
+      if(!found&&window.jsQR&&video.videoWidth){
+        try{if(!scan.canvas)scan.canvas=document.createElement('canvas');if(!scan.ctx)scan.ctx=scan.canvas.getContext('2d',{willReadFrequently:true});const scale=Math.min(1,1280/video.videoWidth);scan.canvas.width=Math.max(1,Math.round(video.videoWidth*scale));scan.canvas.height=Math.max(1,Math.round(video.videoHeight*scale));scan.ctx.drawImage(video,0,0,scan.canvas.width,scan.canvas.height);const image=scan.ctx.getImageData(0,0,scan.canvas.width,scan.canvas.height),code=window.jsQR(image.data,image.width,image.height,{inversionAttempts:'attemptBoth'});if(code?.data)found=code.data}catch(e){}
+      }
+      scan.busy=false;if(found){cameraFound(found);return}cameraFrameId=requestAnimationFrame(scan);
     };
     scan();
   }catch(e){

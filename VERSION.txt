@@ -1,1 +1,1 @@
-BUILD 106 - Orden visual de Rifas, Horarios y perfil
+BUILD 107 - Escáner QR compatible con móviles
