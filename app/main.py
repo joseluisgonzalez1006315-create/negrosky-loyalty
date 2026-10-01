@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.114")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.117")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -978,6 +978,11 @@ def appointment_fits_hours(con, tenant_id: int, branch_id: int, starts_utc: date
 def index():
     return FileResponse(WEB / "index.html")
 
+@app.get("/inicio", include_in_schema=False)
+@app.get("/landing", include_in_schema=False)
+def landing_page():
+    return FileResponse(WEB / "landing.html", headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"})
+
 @app.get("/manifest.webmanifest", include_in_schema=False)
 def pwa_manifest():
     return FileResponse(WEB / "manifest.webmanifest", media_type="application/manifest+json")
@@ -1146,7 +1151,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.114", "build": "114", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.117", "build": "117", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
