@@ -1,1 +1,1 @@
-BUILD 099 - Fecha visible y cierre automático en Colombia
+BUILD 100 - Carga estable en iPhone y orden de módulos
