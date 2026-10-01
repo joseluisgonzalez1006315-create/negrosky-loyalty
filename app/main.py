@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.142")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.144")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1213,7 +1213,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.142", "build": "142", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.144", "build": "144", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -3960,10 +3960,12 @@ def list_notifications(tenant_id: int | None = None,
         require_user_module(con, user, "notifications")
         # Algunas notificaciones históricas fueron creadas antes de guardar created_at.
         # Les asignamos una fecha de respaldo para que el panel nunca quede sin fecha.
-        con.execute("UPDATE notifications SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL OR CAST(created_at AS TEXT)='' ")
-        query = """SELECT n.id,n.tenant_id,n.branch_id,n.customer_id,n.event_type,n.title,n.message,
-        n.read_at,COALESCE(n.created_at,CURRENT_TIMESTAMP) AS created_at,n.image_url,
-        b.name branch_name,c.name customer_name FROM notifications n
+        try:
+            con.execute("UPDATE notifications SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL")
+        except Exception:
+            # No bloquear el panel si una base antigua no permite actualizar registros históricos.
+            pass
+        query = """SELECT n.*,b.name branch_name,c.name customer_name FROM notifications n
         LEFT JOIN branches b ON b.id=n.branch_id LEFT JOIN customers c ON c.id=n.customer_id
         WHERE n.tenant_id=?"""
         params = [scope]
