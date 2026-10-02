@@ -3971,7 +3971,7 @@ def list_notifications(tenant_id: int | None = None,
         except Exception:
             # No bloquear el panel si una base antigua no permite actualizar registros históricos.
             pass
-        query = """SELECT n.*,COALESCE(n.created_at,CURRENT_TIMESTAMP) AS notification_timestamp,COALESCE(n.created_at,CURRENT_TIMESTAMP) AS display_created_at,b.name branch_name,c.name customer_name FROM notifications n
+        query = """SELECT n.*,COALESCE(NULLIF(n.created_at::text,''),CURRENT_TIMESTAMP::text) AS notification_timestamp,COALESCE(NULLIF(n.created_at::text,''),CURRENT_TIMESTAMP::text) AS display_created_at,b.name branch_name,c.name customer_name FROM notifications n
         LEFT JOIN branches b ON b.id=n.branch_id LEFT JOIN customers c ON c.id=n.customer_id
         WHERE n.tenant_id=?"""
         params = [scope]
