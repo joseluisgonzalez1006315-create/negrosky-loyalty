@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.156")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.157")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1260,7 +1260,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.156", "build": "156", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.157", "build": "157", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4312,7 +4312,7 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
             FROM platform_ads WHERE is_active=1""").fetchall()
         business_rows = con.execute("""SELECT id,title,starts_at,ends_at,is_active
             FROM business_ads WHERE tenant_id=? AND is_active=1""", (scope,)).fetchall()
-        landing_rows = con.execute("""SELECT visitor_key,event_type FROM platform_analytics_events
+        landing_rows = con.execute("""SELECT visitor_key FROM platform_analytics_events
             WHERE created_at>=?""", (cutoff,)).fetchall()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     def active_window(row):
@@ -4350,7 +4350,7 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
     return {"tenant": row_dict(tenant), "days": days, "visits": sum(1 for x in rows if x["event_type"] == "page_view"),
             "unique_visitors": len(visitors), "ad_impressions": sum(1 for x in rows if x["event_type"] == "ad_impression"),
             "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"), "active_ads": active_ads,
-            "has_active_ads": bool(active_ads), "landing_visits": sum(1 for x in landing_rows if x["event_type"] == "page_view"),
+            "has_active_ads": bool(active_ads), "landing_visits": len(landing_rows),
             "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}), "daily": daily_out, "ads": ads_out}
 
 @app.post("/api/notifications/read-all")
@@ -4643,7 +4643,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.156",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.157",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}

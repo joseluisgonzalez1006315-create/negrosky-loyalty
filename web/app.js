@@ -1,7 +1,7 @@
 if(!document.getElementById('selected-position'))document.body.insertAdjacentHTML('beforeend','<select id="selected-position" hidden><option value="center"></option></select>');
 if(!document.getElementById('selected-maximize'))document.body.insertAdjacentHTML('beforeend','<button id="selected-maximize" type="button" hidden></button>');
 const ES=window.NegroskyES;const $=id=>document.getElementById(id);let token=localStorage.getItem('negrosky_token'),tenants=[],branches=[],currentPrograms=[],currentTrash=[],currentCollaborations055=[],editingProgramId=null,currentMe=null,lastUrlText='';
-document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 156 · CONTROL DE MÓDULOS · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
+document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 157 · CONTROL DE MÓDULOS · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
 async function api(path,o={}){const h={'Content-Type':'application/json',...(o.headers||{})};if(token)h.Authorization=`Bearer ${token}`;const r=await fetch(path,{...o,cache:'no-store',headers:h});const b=await r.json().catch(()=>({}));if(!r.ok){const message=Array.isArray(b.detail)?'Revisa los datos del formulario e inténtalo de nuevo.':(b.detail||'No fue posible completar la operación');throw Error(message)}return b}
 
 async function loadServerStatus(){const box=$('server-status-result');if(!box)return;try{const started=Date.now(),h=await fetch('/api/health',{cache:'no-store'}),data=await h.json().catch(()=>({}));if(!h.ok)throw Error(`HTTP ${h.status}`);const ms=Date.now()-started;box.innerHTML=`<div class=\"status-panel success\"><b>🟢 Servidor conectado</b><p>Versión: <b>${ES.escape(data.version||'—')}</b> · Build: <b>${ES.escape(data.build||'—')}</b></p><p>Puerto: ${data.port||'—'} · Respuesta: ${ms} ms</p></div>`}catch(e){box.innerHTML=`<div class=\"status-panel error\"><b>🔴 Servidor desconectado</b><p>No se pudo consultar /api/health (${ES.escape(e.message)}).</p></div>`}}
@@ -18,7 +18,7 @@ async function load(){
   const s=dashboardResult.status==='fulfilled'?dashboardResult.value:{businesses:0,branches:0,users:0,customers:0};
   currentMe=me;tenants=tenantsResult.value;
   $('login').classList.add('hidden');$('dashboard').classList.remove('hidden');
-  const title=document.querySelector('#dashboard header .eyebrow');if(title)title.textContent='NEGROSKY LOYALTY V3 · BUILD 156';
+  const title=document.querySelector('#dashboard header .eyebrow');if(title)title.textContent='NEGROSKY LOYALTY V3 · BUILD 157';
   $('identity').textContent=`${me.name} · ${me.username||me.email||me.role}`;
   const superAdmin=me.role==='super_admin';$('tenant-form').closest('.panel').classList.toggle('hidden',!superAdmin);document.querySelector('#user-role option[value="super_admin"]').hidden=!superAdmin;document.querySelector('[data-view="system"]').classList.toggle('hidden',!superAdmin);
   ['businesses','branches','users','customers'].forEach(k=>$(k).textContent=s[k]??'—');
@@ -85,7 +85,7 @@ $('history-tenant').onchange=loadHistory;document.addEventListener('click',e=>{c
 $('branch-tenant').onchange=loadBranches;$('program-tenant').onchange=loadPrograms;$('customer-tenant').onchange=loadCustomers;$('user-tenant').onchange=async()=>{await loadUserBranches();await loadUsers()};$('refresh').onclick=load;$('logout').onclick=async()=>{try{await api('/api/auth/logout',{method:'POST'})}catch(e){}localStorage.removeItem('negrosky_token');location.reload()};if(token)load().catch(()=>{localStorage.removeItem('negrosky_token');location.reload()});
 
 const dayNames=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-document.querySelector('.build-badge').textContent='BUILD 156 · CONTROL DE MÓDULOS · 8030';
+document.querySelector('.build-badge').textContent='BUILD 157 · CONTROL DE MÓDULOS · 8030';
 const hourOptions=Array.from({length:288},(_,index)=>`${String(Math.floor(index/12)).padStart(2,'0')}:${String(index%12*5).padStart(2,'0')}`).concat('23:59');
 const hourSelect=(kind,day,defaultValue)=>`<select class="day-${kind}" data-day="${day}" aria-label="${kind==='open'?'Apertura':'Cierre'} de ${dayNames[day]}">${hourOptions.map(time=>`<option value="${time}" ${time===defaultValue?'selected':''}>${ES.clock(time)}</option>`).join('')}</select>`;
 function setHourValue(select,value){if(![...select.options].some(option=>option.value===value))select.add(new Option(ES.clock(value),value));select.value=value}
@@ -304,9 +304,9 @@ const businessThemes={
 };
 
 // BUILD 049: mantener la identificación visual alineada con el backend.
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 156 · CONTROL DE MÓDULOS · 8030');
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 157 · CONTROL DE MÓDULOS · 8030');
 const buildTitle=document.querySelector('#dashboard header .eyebrow');
-if(buildTitle)buildTitle.textContent='NEGROSKY LOYALTY V3 · BUILD 156';
+if(buildTitle)buildTitle.textContent='NEGROSKY LOYALTY V3 · BUILD 157';
 function selectedTenantName(){const id=+$('branding-tenant').value;return tenants.find(x=>x.id===id)?.name||''}
 function suggestedTheme(){const name=selectedTenantName().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/pizza|restaurante|comida|hamburg|parrilla|granizado|helado|postre/.test(name))return /cafe|postre|granizado|helado/.test(name)?'coffee':'food';if(/cafe|panader|repost/.test(name))return'coffee';if(/belleza|peluquer|barber|spa|unas/.test(name))return'beauty';if(/mascota|veterinar|pet|canino|felino/.test(name))return'pets';if(/salud|clinica|odont|farmacia|terapia/.test(name))return'health';if(/gym|gimnas|fitness|deport/.test(name))return'fitness';if(/piscina|recrea|parque|turismo/.test(name))return'pool';if(/boutique|premium|joya|hotel/.test(name))return'premium';return'retail'}
 function optionalBrandingValue(id){return $(id).value.trim()||null}
@@ -411,8 +411,8 @@ applyActiveTenant=function(){applyActiveTenant055();const active=$('active-tenan
 $('active-tenant').onchange=applyActiveTenant;
 
 function applyFeatureVisibility(){
-  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 156';
-  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 156 · MÓDULOS POR NEGOCIO · 8030';
+  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 157';
+  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 157 · MÓDULOS POR NEGOCIO · 8030';
   const superAdmin=currentMe?.role==='super_admin';
   const adminPreviewActive=superAdmin&&adminPreviewTenant055===activeTenantId055()&&!!adminPreviewModules055;
   const enabled=new Set(adminPreviewActive?Object.entries(adminPreviewModules055).filter(([,value])=>value).map(([key])=>key):(superAdmin?[]:(currentMe?.enabled_modules||[])));
@@ -573,10 +573,10 @@ setTimeout(()=>{const modal=document.getElementById('onboarding-modal');if(!moda
 (function(){const originalApi=api,cache=new Map(),livePath=path=>/\/api\/(notifications\/stream|public\/me\/notifications|raffles\/tickets\/pending|public\/me\/raffle-operations)(?:[?/]|$)/.test(path);api=async function(path,o={}){if(o.method&&o.method!=='GET'||livePath(path))return originalApi(path,o);const key=path,now=Date.now(),hit=cache.get(key);if(hit&&now-hit.time<10000)return hit.promise;const promise=originalApi(path,o).catch(e=>{cache.delete(key);throw e});cache.set(key,{time:now,promise});return promise}})();
 
 // BUILD 068 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 156 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 156';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 157 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 157';
 
 // BUILD 069 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 156 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 156';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 157 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 157';
 
 
 // Estadísticas: visitas anónimas, alcance de publicidad y campañas activas.
