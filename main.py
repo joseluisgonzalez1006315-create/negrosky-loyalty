@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.179")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
@@ -1007,7 +1007,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.179", "build": "179", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3241,20 +3241,26 @@ def appointment_bootstrap(slug: str):
     return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services]}
 
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
-                              stop_at_first=False):
-    branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
-                         (branch_id, tenant_id)).fetchone()
-    hours_branch = branch_id if branch["schedule_mode"] == "custom" else None
-    hours = con.execute("""SELECT weekday,enabled,opens_at,closes_at FROM business_hours
-        WHERE tenant_id=? AND branch_id IS ?""", (tenant_id, hours_branch)).fetchall()
-    day_begin = datetime(target_day.year, target_day.month, target_day.day, tzinfo=zone).astimezone(timezone.utc)
-    day_end = day_begin + timedelta(days=2)
-    occupied = con.execute("""SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
-        FROM appointments WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
-        AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?""",
-        (tenant_id, branch_id, day_end.isoformat(), day_begin.isoformat())).fetchall()
+                              stop_at_first=False, hours_rows=None, busy_rows=None):
+    # For a single day we load the schedule and occupied appointments normally.
+    # The month calendar passes preloaded values so it does not repeat these queries
+    # once per day on Render.
+    if hours_rows is None:
+        branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
+                             (branch_id, tenant_id)).fetchone()
+        hours_branch = branch_id if branch["schedule_mode"] == "custom" else None
+        hours_rows = con.execute("""SELECT weekday,enabled,opens_at,closes_at FROM business_hours
+            WHERE tenant_id=? AND branch_id IS ?""", (tenant_id, hours_branch)).fetchall()
+    hours = hours_rows
+    if busy_rows is None:
+        day_begin = datetime(target_day.year, target_day.month, target_day.day, tzinfo=zone).astimezone(timezone.utc)
+        day_end = day_begin + timedelta(days=2)
+        busy_rows = con.execute("""SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
+            FROM appointments WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
+            AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?""",
+            (tenant_id, branch_id, day_end.isoformat(), day_begin.isoformat())).fetchall()
     busy = [(datetime.fromisoformat(row["starts_at"]), datetime.fromisoformat(row["occupied_end"]))
-            for row in occupied]
+            for row in busy_rows]
     now = datetime.now(timezone.utc) + timedelta(minutes=10)
     result = []
     for hour in range(24):
@@ -3344,12 +3350,33 @@ def appointment_month_calendar(slug: str, branch_id: int, service_id: int, month
         if first > today + timedelta(days=180) or first.month < 1:
             raise HTTPException(status_code=422, detail="Mes fuera del período de reservas")
         following = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+        # Preload the branch schedule and all occupied appointments once.
+        # Previously this endpoint executed one or two database queries per day
+        # (up to 31 round trips), which made the calendar feel slow on Render.
+        branch_settings = con.execute(
+            "SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
+            (branch_id, tenant["id"]),
+        ).fetchone()
+        hours_branch = branch_id if branch_settings["schedule_mode"] == "custom" else None
+        hours_rows = con.execute(
+            "SELECT weekday,enabled,opens_at,closes_at FROM business_hours WHERE tenant_id=? AND branch_id IS ?",
+            (tenant["id"], hours_branch),
+        ).fetchall()
+        range_start = datetime(first.year, first.month, first.day, tzinfo=zone).astimezone(timezone.utc)
+        range_end = datetime(following.year, following.month, following.day, tzinfo=zone).astimezone(timezone.utc)
+        occupied_rows = con.execute("""
+            SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
+            FROM appointments
+            WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
+              AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?
+        """, (tenant["id"], branch_id, range_end.isoformat(), range_start.isoformat())).fetchall()
         days = {}
         day = first
         while day < following:
             if today <= day <= today + timedelta(days=180):
                 count = sum(slot["available"] for slot in appointment_slots_for_day(
-                    con, tenant["id"], branch_id, service, zone, day))
+                    con, tenant["id"], branch_id, service, zone, day,
+                    hours_rows=hours_rows, busy_rows=occupied_rows))
                 if count:
                     days[day.isoformat()] = count
             day += timedelta(days=1)
