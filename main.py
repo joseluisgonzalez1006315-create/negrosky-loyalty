@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.181")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.182")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
@@ -1007,7 +1007,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.181", "build": "181", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.182", "build": "182", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3238,9 +3238,10 @@ def appointment_bootstrap(slug: str):
             raise HTTPException(status_code=404, detail="Agenda de citas no disponible")
         services = con.execute("""SELECT id,name,duration_minutes,price,branch_id FROM appointment_services
             WHERE tenant_id=? AND status='active' ORDER BY name""", (tenant["id"],)).fetchall()
-        branding = con.execute("SELECT whatsapp_number FROM business_branding WHERE tenant_id=?", (tenant["id"],)).fetchone()
+        branding = con.execute("SELECT display_name,whatsapp_number FROM business_branding WHERE tenant_id=?", (tenant["id"],)).fetchone()
     return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services],
-            "whatsapp": branding["whatsapp_number"] if branding else None}
+            "whatsapp": branding["whatsapp_number"] if branding else None,
+            "business_name": (branding["display_name"] if branding and branding["display_name"] else tenant["name"])}
 
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
                               stop_at_first=False, hours_rows=None, busy_rows=None):

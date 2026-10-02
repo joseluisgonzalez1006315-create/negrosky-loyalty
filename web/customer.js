@@ -225,6 +225,8 @@ const customerCalendarCachePrefix=()=>`negrosky_appointment_calendar_${slug}`;
 const appointmentCalendarRequests=new Map();
 let appointmentModulePromise=null;
 let customerBusinessWhatsApp="";
+let customerBusinessName="";
+let customerAppointmentCustomerName="";
 function renderCustomerDates(data){
   const month=data.month,[year,number]=month.split('-').map(Number);
   const first=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
@@ -310,15 +312,17 @@ function whatsappDigits(value){
 function updateCustomerAppointmentWhatsApp(){
   const button=$('customer-appointment-whatsapp');
   if(!button)return;
-  const phone=whatsappDigits(customerBusinessWhatsApp),branch=$('customer-appointment-branch')?.selectedOptions?.[0]?.textContent?.trim()||'',service=$('customer-appointment-service')?.selectedOptions?.[0]?.textContent?.trim()||'',date=$('customer-appointment-date')?.value||'',time=$('customer-appointment-time')?.selectedOptions?.[0]?.textContent?.trim()||'';
+  const phone=whatsappDigits(customerBusinessWhatsApp),branch=$('customer-appointment-branch')?.selectedOptions?.[0]?.textContent?.trim()||'',serviceRaw=$('customer-appointment-service')?.selectedOptions?.[0]?.textContent?.trim()||'',service=serviceRaw.split(' · ')[0],date=$('customer-appointment-date')?.value||'',time=$('customer-appointment-time')?.selectedOptions?.[0]?.textContent?.trim()||'';
   const ready=phone&&branch&&service&&date&&time;
   button.classList.toggle('hidden',!ready);
   if(!ready){button.removeAttribute('href');return}
-  const message=`Hola, quiero confirmar una cita en ${branch}.\nServicio: ${service}\nFecha: ${date}\nHora: ${time}`;
+  const dateLabel=new Intl.DateTimeFormat('es-CO',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(date+'T12:00:00Z'));
+  const customer=customerAppointmentCustomerName||'un cliente';
+  const message=`¡Hola, ${customerBusinessName||'equipo del negocio'}! 👋\n\nSoy ${customer} y quiero confirmar mi cita. 😊\n\n📍 Sucursal: ${branch}\n💇 Servicio: ${service}\n📅 Fecha: ${dateLabel}\n🕒 Hora: ${time}\n\n¿Me confirman por favor? ¡Muchas gracias! 🙌`;
   button.href=`https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
 }
 function renderAppointmentBootstrap(data,profile){
-  const locations=Array.isArray(data?.branches)?data.branches:[],services=Array.isArray(data?.services)?data.services:[],message=$('customer-appointment-message');customerBusinessWhatsApp=data?.whatsapp||"";
+  const locations=Array.isArray(data?.branches)?data.branches:[],services=Array.isArray(data?.services)?data.services:[],message=$('customer-appointment-message');customerBusinessWhatsApp=data?.whatsapp||"";customerBusinessName=data?.business_name||"";customerAppointmentCustomerName=profile?.customer?.name||"";
   if(!locations.length){setAppointmentVisibility(true);if(message)message.textContent='Este negocio todavía no tiene sucursales activas para reservar.';return false}
   $('customer-appointment-branch').innerHTML=locations.map(b=>`<option value="${b.id}">${ES.escape(b.name)}${b.city?' · '+ES.escape(b.city):''}</option>`).join('');
   if(profile?.customer?.origin_branch_id&&locations.some(b=>b.id===profile.customer.origin_branch_id))$('customer-appointment-branch').value=profile.customer.origin_branch_id;
