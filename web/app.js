@@ -181,6 +181,14 @@ async function loadAppointmentServices(){
 let calendarCursor=null,calendarSelected=null,calendarRows=[];
 function businessCalendarZone(){const tenantId=+$('appointment-tenant').value;return tenants.find(x=>x.id===tenantId)?.timezone||'America/Bogota'}
 function currentCalendarMonth(){if(!calendarCursor){const today=ES.dayKey(new Date(),businessCalendarZone());calendarCursor=today.slice(0,7);calendarSelected=today}return calendarCursor}
+function appointmentWhatsAppHref(row){
+  let phone=String(row?.customer_phone||'').replace(/\D/g,'');
+  if(phone.length===10&&phone.startsWith('3'))phone='57'+phone;
+  if(!phone)return '';
+  const zone=businessCalendarZone(),when=ES.dateTime(row.starts_at,zone);
+  const text=`Hola ${row.customer_name||''}, te contactamos de parte del negocio sobre tu cita.\nServicio: ${row.service_name||''}\nSucursal: ${row.branch_name||''}\nFecha y hora: ${when}`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+}
 function renderAppointmentCalendar(){
   const month=currentCalendarMonth(),zone=businessCalendarZone(),[year,number]=month.split('-').map(Number);
   const start=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
@@ -200,7 +208,7 @@ function renderAppointmentCalendar(){
     const active=['scheduled','confirmed'].includes(x.status);
     const delay=x.delay_minutes?`<p class="delay-warning">Demora aproximada: ${x.delay_minutes} minutos · Fin estimado: ${ES.appointmentTime(x.estimated_end_at,zone)}</p>`:'';
     const reason=x.cancellation_reason?`<p>Motivo de cancelación: ${ES.escape(x.cancellation_reason)}</p>`:'';
-    return `<article class="calendar-event ${x.status==='cancelled'?'cancelled':''}"><div class="calendar-event-time">${ES.appointmentTime(x.starts_at,zone)}</div><div><b>${ES.escape(x.customer_name)}</b> <span class="calendar-state">${ES.appointmentStates[x.status]||ES.escape(x.status)}</span><p>${ES.escape(x.service_name)} · ${ES.escape(x.branch_name)}</p><p>Duración aproximada: ${x.duration_minutes||Math.round((new Date(x.ends_at)-new Date(x.starts_at))/60000)} minutos · Teléfono: ${ES.escape(x.customer_phone)}</p>${delay}${reason}${active?ES.delayForm(x.id,x.delay_minutes||0):''}<select aria-label="Cambiar estado de la cita" ${active?'':'disabled'} onchange="setAppointmentStatus(${x.id},this.value)"><option value="">Cambiar estado…</option><option value="confirmed">Confirmar</option><option value="completed">Completada</option><option value="cancelled">Cancelar</option><option value="no_show">No asistió</option></select></div></article>`
+    return `<article class="calendar-event ${x.status==='cancelled'?'cancelled':''}"><div class="calendar-event-time">${ES.appointmentTime(x.starts_at,zone)}</div><div><b>${ES.escape(x.customer_name)}</b> <span class="calendar-state">${ES.appointmentStates[x.status]||ES.escape(x.status)}</span><p>${ES.escape(x.service_name)} · ${ES.escape(x.branch_name)}</p><p>Duración aproximada: ${x.duration_minutes||Math.round((new Date(x.ends_at)-new Date(x.starts_at))/60000)} minutos · Teléfono: ${ES.escape(x.customer_phone)}</p>${appointmentWhatsAppHref(x)?`<a class="whatsapp-action" href="${appointmentWhatsAppHref(x)}" target="_blank" rel="noopener">💬 WhatsApp al cliente</a>`:''}${delay}${reason}${active?ES.delayForm(x.id,x.delay_minutes||0):''}<select aria-label="Cambiar estado de la cita" ${active?'':'disabled'} onchange="setAppointmentStatus(${x.id},this.value)"><option value="">Cambiar estado…</option><option value="confirmed">Confirmar</option><option value="completed">Completada</option><option value="cancelled">Cancelar</option><option value="no_show">No asistió</option></select></div></article>`
   }).join(''):'<p class="muted">No hay citas para este día.</p>';
   $('appointment-list').innerHTML=calendarRows.length?`<table><tr><th>Fecha y hora</th><th>Cliente</th><th>Servicio</th><th>Sucursal</th><th>Estado</th></tr>${calendarRows.map(x=>`<tr><td>${ES.dateTime(x.starts_at,zone)}</td><td>${ES.escape(x.customer_name)}<br><small>${ES.escape(x.customer_phone)}</small></td><td>${ES.escape(x.service_name)}</td><td>${ES.escape(x.branch_name)}</td><td>${ES.appointmentStates[x.status]||ES.escape(x.status)}</td></tr>`).join('')}</table>`:'<p class="muted">Todavía no hay citas registradas este mes.</p>';
 }

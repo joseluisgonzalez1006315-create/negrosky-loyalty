@@ -224,6 +224,7 @@ let customerMonth=null;
 const customerCalendarCachePrefix=()=>`negrosky_appointment_calendar_${slug}`;
 const appointmentCalendarRequests=new Map();
 let appointmentModulePromise=null;
+let customerBusinessWhatsApp="";
 function renderCustomerDates(data){
   const month=data.month,[year,number]=month.split('-').map(Number);
   const first=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
@@ -271,18 +272,18 @@ async function loadAppointmentDates(){
   appointmentCalendarRequests.set(key,request);
   return request;
 }
-$('customer-calendar-days').onclick=event=>{const button=event.target.closest('[data-book-date]');if(!button||button.disabled)return;$('customer-appointment-date').value=button.dataset.bookDate;$('customer-chosen-date').textContent=`Fecha seleccionada: ${new Intl.DateTimeFormat('es-CO',{dateStyle:'full',timeZone:'UTC'}).format(new Date(button.dataset.bookDate+'T12:00:00Z'))}`;document.querySelectorAll('[data-book-date]').forEach(item=>item.classList.toggle('selected',item===button));loadAppointmentAvailability()};
+$('customer-calendar-days').onclick=event=>{const button=event.target.closest('[data-book-date]');if(!button||button.disabled)return;$('customer-appointment-date').value=button.dataset.bookDate;$('customer-chosen-date').textContent=`Fecha seleccionada: ${new Intl.DateTimeFormat('es-CO',{dateStyle:'full',timeZone:'UTC'}).format(new Date(button.dataset.bookDate+'T12:00:00Z'))}`;document.querySelectorAll('[data-book-date]').forEach(item=>item.classList.toggle('selected',item===button));updateCustomerAppointmentWhatsApp();loadAppointmentAvailability()};
 function moveCustomerMonth(offset){const [year,number]=(customerMonth||ES.dayKey(new Date(),customerTimeZone).slice(0,7)).split('-').map(Number);const next=new Date(Date.UTC(year,number-1+offset,1));customerMonth=`${next.getUTCFullYear()}-${String(next.getUTCMonth()+1).padStart(2,'0')}`;$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';loadAppointmentDates()}
 $('customer-calendar-prev').onclick=()=>moveCustomerMonth(-1);
 $('customer-calendar-next').onclick=()=>moveCustomerMonth(1);
 async function loadAppointmentAvailability(){
   const date=$('customer-appointment-date').value,branch=+$('customer-appointment-branch').value,service=+$('customer-appointment-service').value;
-  const select=$('customer-appointment-time');select.innerHTML='<option value="">Selecciona una fecha y servicio</option>';$('next-appointment-date').classList.add('hidden');
+  const select=$('customer-appointment-time');select.innerHTML='<option value="">Selecciona una fecha y servicio</option>';select.onchange=updateCustomerAppointmentWhatsApp;$('next-appointment-date').classList.add('hidden');updateCustomerAppointmentWhatsApp();
   if(!date||!branch||!service)return;
   try{const data=await api(`/api/public/${slug}/appointment-availability?branch_id=${branch}&service_id=${service}&date=${encodeURIComponent(date)}`);
     if(date!==$('customer-appointment-date').value||branch!==+$('customer-appointment-branch').value||service!==+$('customer-appointment-service').value)return;
     customerTimeZone=data.timezone;const available=data.slots.filter(x=>x.available).length;
-    select.innerHTML='<option value="">Selecciona una hora disponible</option>'+data.slots.filter(x=>x.available).map(x=>`<option value="${x.starts_at}">${ES.clock(x.time)}</option>`).join('');
+    select.innerHTML='<option value="">Selecciona una hora disponible</option>'+data.slots.filter(x=>x.available).map(x=>`<option value="${x.starts_at}">${ES.clock(x.time)}</option>`).join('');select.onchange=updateCustomerAppointmentWhatsApp;updateCustomerAppointmentWhatsApp();
     const next=$('next-appointment-date');next.classList.toggle('hidden',available>0||!data.next_available_date);next.dataset.date=data.next_available_date||'';
     if(!available){$('appointment-availability').textContent=data.next_available_date?`No quedan citas disponibles el ${date}. El próximo día con cupos es ${data.next_available_date}.`:`No quedan citas disponibles el ${date}. Prueba con otra fecha.`;showToast('No hay más citas ese día. Elige el próximo día disponible.')}else $('appointment-availability').textContent=`${available} hora(s) disponible(s). Horario local del negocio. Elige la hora que prefieras.`;
   }catch(e){select.innerHTML='<option value="">Sin horarios disponibles</option>';$('appointment-availability').textContent=e.message;showToast(e.message,'error')}
@@ -301,8 +302,23 @@ $('customer-appointments').addEventListener('submit',async event=>{
   try{await api(`/api/public/me/appointments/${form.dataset.cancelId}/cancel`,{method:'POST',body:JSON.stringify({reason:form.elements.reason.value.trim()})});showToast('Tu cita quedó cancelada. El horario volvió a estar disponible.','success');await Promise.all([loadMyAppointments(),loadAppointmentDates()])}
   catch(e){showToast(e.message,'error');button.disabled=false}
 });
+function whatsappDigits(value){
+  let digits=String(value||'').replace(/\D/g,'');
+  if(digits.length===10&&digits.startsWith('3'))digits='57'+digits;
+  return digits;
+}
+function updateCustomerAppointmentWhatsApp(){
+  const button=$('customer-appointment-whatsapp');
+  if(!button)return;
+  const phone=whatsappDigits(customerBusinessWhatsApp),branch=$('customer-appointment-branch')?.selectedOptions?.[0]?.textContent?.trim()||'',service=$('customer-appointment-service')?.selectedOptions?.[0]?.textContent?.trim()||'',date=$('customer-appointment-date')?.value||'',time=$('customer-appointment-time')?.selectedOptions?.[0]?.textContent?.trim()||'';
+  const ready=phone&&branch&&service&&date&&time;
+  button.classList.toggle('hidden',!ready);
+  if(!ready){button.removeAttribute('href');return}
+  const message=`Hola, quiero confirmar una cita en ${branch}.\nServicio: ${service}\nFecha: ${date}\nHora: ${time}`;
+  button.href=`https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
 function renderAppointmentBootstrap(data,profile){
-  const locations=Array.isArray(data?.branches)?data.branches:[],services=Array.isArray(data?.services)?data.services:[],message=$('customer-appointment-message');
+  const locations=Array.isArray(data?.branches)?data.branches:[],services=Array.isArray(data?.services)?data.services:[],message=$('customer-appointment-message');customerBusinessWhatsApp=data?.whatsapp||"";
   if(!locations.length){setAppointmentVisibility(true);if(message)message.textContent='Este negocio todavía no tiene sucursales activas para reservar.';return false}
   $('customer-appointment-branch').innerHTML=locations.map(b=>`<option value="${b.id}">${ES.escape(b.name)}${b.city?' · '+ES.escape(b.city):''}</option>`).join('');
   if(profile?.customer?.origin_branch_id&&locations.some(b=>b.id===profile.customer.origin_branch_id))$('customer-appointment-branch').value=profile.customer.origin_branch_id;
@@ -310,6 +326,7 @@ function renderAppointmentBootstrap(data,profile){
   setAppointmentVisibility(true);
   $('customer-appointment-service').innerHTML=eligible.length?eligible.map(x=>`<option value="${x.id}">${ES.escape(x.name)} · ${x.duration_minutes} minutos${x.price===null?'':' · $'+Number(x.price).toLocaleString('es-CO')}</option>`).join(''):'<option value="">Sin servicios configurados</option>';
   if(!eligible.length){$('customer-calendar-days').textContent='No hay servicios activos para esta sucursal.';if(message)message.textContent='Configura un servicio activo en Agenda de citas.';return false}
+  updateCustomerAppointmentWhatsApp();
   return true;
 }
 async function _loadAppointmentModule(profile=null){
@@ -333,8 +350,8 @@ async function loadAppointmentModule(profile=null){
   appointmentModulePromise=_loadAppointmentModule(profile);
   try{return await appointmentModulePromise}finally{appointmentModulePromise=null}
 }
-$('customer-appointment-branch').onchange=()=>{$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';loadAppointmentModule().catch(()=>{})};
-$('customer-appointment-service').onchange=()=>{$('customer-appointment-date').value='';loadAppointmentDates()};
+$('customer-appointment-branch').onchange=()=>{$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';updateCustomerAppointmentWhatsApp();loadAppointmentModule().catch(()=>{})};
+$('customer-appointment-service').onchange=()=>{$('customer-appointment-date').value='';updateCustomerAppointmentWhatsApp();loadAppointmentDates()};
 
 $('next-appointment-date').onclick=async()=>{const next=$('next-appointment-date').dataset.date;if(next){customerMonth=next.slice(0,7);$('customer-appointment-date').value=next;await loadAppointmentDates();await loadAppointmentAvailability()}};
 $('customer-appointment-form').onsubmit=async e=>{e.preventDefault();if(!$('customer-appointment-date').value||!$('customer-appointment-time').value){showToast('Escoge primero una fecha y un horario disponibles.','error');return}try{const created=await api('/api/public/me/appointments',{method:'POST',body:JSON.stringify({branch_id:+$('customer-appointment-branch').value,service_id:+$('customer-appointment-service').value,starts_at:$('customer-appointment-time').value,notes:$('customer-appointment-notes').value||null})});$('customer-appointment-message').textContent=`Cita agendada para ${ES.dateTime(created.starts_at,customerTimeZone)}.`;showToast('Cita agendada correctamente.','success');$('customer-appointment-notes').value='';await Promise.all([loadAppointmentDates(),loadAppointmentAvailability(),loadMyAppointments()])}catch(x){$('customer-appointment-message').textContent=x.message;showToast(x.message,'error');await loadAppointmentDates();await loadAppointmentAvailability()}};

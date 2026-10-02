@@ -1261,7 +1261,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.180", "build": "180", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.181", "build": "181", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -3644,7 +3644,9 @@ def appointment_bootstrap(slug: str):
             raise HTTPException(status_code=404, detail="Agenda de citas no disponible")
         services = con.execute("""SELECT id,name,duration_minutes,price,branch_id FROM appointment_services
             WHERE tenant_id=? AND status='active' ORDER BY name""", (tenant["id"],)).fetchall()
-    return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services]}
+        branding = con.execute("SELECT whatsapp_number FROM business_branding WHERE tenant_id=?", (tenant["id"],)).fetchone()
+    return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services],
+            "whatsapp": branding["whatsapp_number"] if branding else None}
 
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
                               stop_at_first=False, hours_rows=None, busy_rows=None):
@@ -3898,9 +3900,9 @@ def list_appointments(tenant_id: int | None = None, branch_id: int | None = None
     with connection() as con:
         require_user_module(con, user, "appointments", branch_id)
         query = """SELECT a.*,c.name customer_name,c.phone customer_phone,s.name service_name,s.duration_minutes,
-        b.name branch_name,t.timezone tenant_timezone FROM appointments a JOIN customers c ON c.id=a.customer_id
+        b.name branch_name,t.timezone tenant_timezone,bb.whatsapp_number business_whatsapp FROM appointments a JOIN customers c ON c.id=a.customer_id
         JOIN appointment_services s ON s.id=a.service_id JOIN branches b ON b.id=a.branch_id
-        JOIN tenants t ON t.id=a.tenant_id
+        JOIN tenants t ON t.id=a.tenant_id LEFT JOIN business_branding bb ON bb.tenant_id=a.tenant_id
         WHERE a.tenant_id=?"""
         params = [scope]
         if branch_id is not None:
