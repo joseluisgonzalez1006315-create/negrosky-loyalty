@@ -191,6 +191,7 @@ class PlatformAdInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str | None = Field(default=None, max_length=500)
     target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     image_url: str = Field(min_length=20, max_length=8_000_000)
     target_tenants: list[int] = Field(default_factory=list, max_length=500)
     starts_at: str | None = None
@@ -203,6 +204,7 @@ class BusinessAdInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str | None = Field(default=None, max_length=500)
     target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     image_url: str = Field(min_length=20, max_length=8_000_000)
     starts_at: str | None = None
     ends_at: str | None = None

@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.159")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.162")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1261,7 +1261,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.159", "build": "159", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.162", "build": "162", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1511,12 +1511,16 @@ def ensure_ad_target_url_column():
     with connection() as con:
         if using_postgres():
             con.execute("ALTER TABLE platform_ads ADD COLUMN IF NOT EXISTS target_url TEXT")
+            con.execute("ALTER TABLE platform_ads ADD COLUMN IF NOT EXISTS target_label TEXT")
             con.execute("ALTER TABLE business_ads ADD COLUMN IF NOT EXISTS target_url TEXT")
+            con.execute("ALTER TABLE business_ads ADD COLUMN IF NOT EXISTS target_label TEXT")
         else:
             for table in ("platform_ads", "business_ads"):
                 columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
                 if "target_url" not in columns:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN target_url TEXT")
+                if "target_label" not in columns:
+                    con.execute(f"ALTER TABLE {table} ADD COLUMN target_label TEXT")
 
 
 def _platform_ad_dict(row):
@@ -1536,6 +1540,8 @@ def _validate_platform_ad(data: PlatformAdInput):
     if len(data.image_url) > 2_400_000:
         raise HTTPException(status_code=422, detail="La imagen es demasiado grande; usa un flyer más liviano")
     _validate_ad_target_url(data.target_url)
+    if data.target_label and not str(data.target_label).strip():
+        data.target_label = None
     if data.starts_at and data.ends_at and data.ends_at < data.starts_at:
         raise HTTPException(status_code=422, detail="La fecha final debe ser posterior a la inicial")
 
@@ -1555,8 +1561,8 @@ def create_platform_ad(data: PlatformAdInput, user=Depends(require("super_admin"
         if targets and len(con.execute("SELECT id FROM tenants WHERE id IN (%s)" % ",".join("?" * len(targets)), targets).fetchall()) != len(targets):
             raise HTTPException(status_code=422, detail="Uno de los negocios seleccionados no existe")
         cur = con.execute("""INSERT INTO platform_ads
-            (title,message,image_url,target_tenants_json,starts_at,ends_at,ad_seconds,is_active,target_url,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url)))
+            (title,message,image_url,target_tenants_json,starts_at,ends_at,ad_seconds,is_active,target_url,target_label,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None))
         row = con.execute("SELECT * FROM platform_ads WHERE id=?", (cur.lastrowid,)).fetchone()
     return _platform_ad_dict(row)
 
@@ -1570,7 +1576,7 @@ def update_platform_ad(ad_id: int, data: PlatformAdInput, user=Depends(require("
             raise HTTPException(status_code=404, detail="Publicidad no encontrada")
         if targets and len(con.execute("SELECT id FROM tenants WHERE id IN (%s)" % ",".join("?" * len(targets)), targets).fetchall()) != len(targets):
             raise HTTPException(status_code=422, detail="Uno de los negocios seleccionados no existe")
-        con.execute("""UPDATE platform_ads SET title=?,message=?,image_url=?,target_tenants_json=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), ad_id))
+        con.execute("""UPDATE platform_ads SET title=?,message=?,image_url=?,target_tenants_json=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,target_label=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None, ad_id))
         row = con.execute("SELECT * FROM platform_ads WHERE id=?", (ad_id,)).fetchone()
     return _platform_ad_dict(row)
 
@@ -1606,7 +1612,7 @@ def create_business_ad(data: BusinessAdInput, user=Depends(require("super_admin"
     _validate_platform_ad(PlatformAdInput(title=data.title, message=data.message, image_url=data.image_url, starts_at=data.starts_at, ends_at=data.ends_at, ad_seconds=data.ad_seconds, is_active=data.is_active))
     scope = tenant_scope(user, data.tenant_id)
     with connection() as con:
-        cur = con.execute("INSERT INTO business_ads (tenant_id,title,message,image_url,starts_at,ends_at,ad_seconds,is_active,target_url,updated_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)", (scope, data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url)))
+        cur = con.execute("INSERT INTO business_ads (tenant_id,title,message,image_url,starts_at,ends_at,ad_seconds,is_active,target_url,target_label,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)", (scope, data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None))
         row = con.execute("SELECT * FROM business_ads WHERE id=?", (cur.lastrowid,)).fetchone()
     return {**row_dict(row), "is_active": bool(row["is_active"])}
 
@@ -1621,7 +1627,7 @@ def update_business_ad(ad_id: int, data: BusinessAdInput, user=Depends(require("
         scope = tenant_scope(user, data.tenant_id or row["tenant_id"])
         if row["tenant_id"] != scope:
             raise HTTPException(status_code=403, detail="No tiene permiso para esta publicidad")
-        con.execute("UPDATE business_ads SET title=?,message=?,image_url=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), ad_id))
+        con.execute("UPDATE business_ads SET title=?,message=?,image_url=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,target_label=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None, ad_id))
         row = con.execute("SELECT * FROM business_ads WHERE id=?", (ad_id,)).fetchone()
     return {**row_dict(row), "is_active": bool(row["is_active"])}
 
@@ -4257,7 +4263,7 @@ def public_platform_ads(slug: str):
         tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
         if not tenant or not module_enabled(con, tenant["id"], "public_page"):
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        rows = con.execute("""SELECT id,title,message,image_url,target_url,target_tenants_json,starts_at,ends_at,ad_seconds
+        rows = con.execute("""SELECT id,title,message,image_url,target_url,target_label,target_tenants_json,starts_at,ends_at,ad_seconds
             FROM platform_ads WHERE is_active=1
             AND (starts_at IS NULL OR starts_at<=?)
             AND (ends_at IS NULL OR ends_at>=?)
@@ -4271,7 +4277,7 @@ def public_platform_ads(slug: str):
         if not targets or tenant["id"] in targets:
             result.append(row_dict(row))
     with connection() as con:
-        business_rows = con.execute("""SELECT id,title,message,image_url,target_url,starts_at,ends_at,ad_seconds
+        business_rows = con.execute("""SELECT id,title,message,image_url,target_url,target_label,starts_at,ends_at,ad_seconds
             FROM business_ads WHERE tenant_id=? AND is_active=1
             AND (starts_at IS NULL OR starts_at<=?)
             AND (ends_at IS NULL OR ends_at>=?)
@@ -4665,7 +4671,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.159",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.162",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
