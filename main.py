@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.182")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.183")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
@@ -1007,7 +1007,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.182", "build": "182", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.183", "build": "183", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -3453,7 +3453,26 @@ def my_appointments(customer=Depends(current_customer)):
             WHERE a.customer_id=? AND a.tenant_id=?
             ORDER BY a.starts_at DESC LIMIT 100""", (customer["id"], customer["tenant_id"]),
         ).fetchall()
-    return [row_dict(row) for row in rows]
+    # La limpieza es solo visual para el cliente: nunca se borran citas de la base
+    # ni del historial administrativo. Las completadas/no asistió desaparecen
+    # inmediatamente; los demás estados se conservan hasta 24 horas después
+    # de terminar el día local de la cita.
+    visible = []
+    for row in rows:
+        if row["status"] in ("completed", "no_show"):
+            continue
+        try:
+            zone = ZoneInfo(row["tenant_timezone"])
+        except ZoneInfoNotFoundError:
+            zone = timezone(timedelta(hours=-5))
+        starts_local = datetime.fromisoformat(row["starts_at"]).astimezone(zone)
+        hide_after = datetime.combine(
+            starts_local.date() + timedelta(days=2), datetime.min.time(), tzinfo=zone
+        )
+        if datetime.now(zone) >= hide_after:
+            continue
+        visible.append(row_dict(row))
+    return visible
 
 
 @app.post("/api/public/me/appointments/{appointment_id}/cancel")
