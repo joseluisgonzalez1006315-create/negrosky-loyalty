@@ -282,27 +282,34 @@ $('customer-appointments').addEventListener('submit',async event=>{
   try{await api(`/api/public/me/appointments/${form.dataset.cancelId}/cancel`,{method:'POST',body:JSON.stringify({reason:form.elements.reason.value.trim()})});showToast('Tu cita quedó cancelada. El horario volvió a estar disponible.','success');await Promise.all([loadMyAppointments(),loadAppointmentDates()])}
   catch(e){showToast(e.message,'error');button.disabled=false}
 });
+function renderAppointmentBootstrap(data,profile){
+  const locations=Array.isArray(data?.branches)?data.branches:[],services=Array.isArray(data?.services)?data.services:[],message=$('customer-appointment-message');
+  if(!locations.length){setAppointmentVisibility(true);if(message)message.textContent='Este negocio todavía no tiene sucursales activas para reservar.';return false}
+  $('customer-appointment-branch').innerHTML=locations.map(b=>`<option value="${b.id}">${ES.escape(b.name)}${b.city?' · '+ES.escape(b.city):''}</option>`).join('');
+  if(profile?.customer?.origin_branch_id&&locations.some(b=>b.id===profile.customer.origin_branch_id))$('customer-appointment-branch').value=profile.customer.origin_branch_id;
+  const branch=+$('customer-appointment-branch').value,eligible=services.filter(x=>x.branch_id===null||Number(x.branch_id)===branch);
+  setAppointmentVisibility(true);
+  $('customer-appointment-service').innerHTML=eligible.length?eligible.map(x=>`<option value="${x.id}">${ES.escape(x.name)} · ${x.duration_minutes} minutos${x.price===null?'':' · $'+Number(x.price).toLocaleString('es-CO')}</option>`).join(''):'<option value="">Sin servicios configurados</option>';
+  if(!eligible.length){$('customer-calendar-days').textContent='No hay servicios activos para esta sucursal.';if(message)message.textContent='Configura un servicio activo en Agenda de citas.';return false}
+  return true;
+}
 async function loadAppointmentModule(profile=null){
   if(!token||!customerModuleEnabled('appointments')){setAppointmentVisibility(false);return}
-  const message=$('customer-appointment-message');
+  const message=$('customer-appointment-message'),cacheKey=`negrosky_appointment_bootstrap_${slug}`,now=Date.now();
+  let cached=null;try{cached=JSON.parse(localStorage.getItem(cacheKey)||'null')}catch(_){cached=null}
+  profile=profile||null;
+  if(cached?.data&&now-Number(cached.saved_at||0)<300000){renderAppointmentBootstrap(cached.data,profile);if(message)message.textContent='Actualizando horarios…';loadAppointmentDates().catch(()=>{});loadMyAppointments().catch(()=>{})}
+  else {setAppointmentVisibility(true);if(message)message.textContent='Cargando sucursales y servicios…'}
   try{
     const [resolvedProfile,response]=await Promise.all([profile||api('/api/public/me/cards'),fetch(`/api/public/${slug}/appointment-bootstrap`,{cache:'no-store'})]);
     if(!response.ok)throw Error('No fue posible cargar la configuración de reservas.');
-    const data=await response.json(),locations=Array.isArray(data.branches)?data.branches:[],services=Array.isArray(data.services)?data.services:[];
-    profile=resolvedProfile;
-    if(!locations.length){setAppointmentVisibility(true);if(message)message.textContent='Este negocio todavía no tiene sucursales activas para reservar.';return}
-    $('customer-appointment-branch').innerHTML=locations.map(b=>`<option value="${b.id}">${ES.escape(b.name)}${b.city?' · '+ES.escape(b.city):''}</option>`).join('');
-    if(profile.customer.origin_branch_id&&locations.some(b=>b.id===profile.customer.origin_branch_id))$('customer-appointment-branch').value=profile.customer.origin_branch_id;
-    const branch=+$('customer-appointment-branch').value;
-    const eligible=services.filter(x=>x.branch_id===null||Number(x.branch_id)===branch);
-    setAppointmentVisibility(true);
-    $('customer-appointment-service').innerHTML=eligible.length?eligible.map(x=>`<option value="${x.id}">${ES.escape(x.name)} · ${x.duration_minutes} minutos${x.price===null?'':' · $'+Number(x.price).toLocaleString('es-CO')}</option>`).join(''):'<option value="">Sin servicios configurados</option>';
-    if(!eligible.length){$('customer-calendar-days').textContent='No hay servicios activos para esta sucursal.';if(message)message.textContent='Configura un servicio activo en Agenda de citas.';return}
+    const data=await response.json();localStorage.setItem(cacheKey,JSON.stringify({saved_at:Date.now(),data}));
+    if(!renderAppointmentBootstrap(data,resolvedProfile))return;
     await Promise.all([loadAppointmentDates(),loadMyAppointments()]);
-    if(message&&message.textContent.includes('Cargando'))message.textContent='';
-  }catch(e){setAppointmentVisibility(true);if(message)message.textContent=e?.message||'No fue posible cargar la agenda.';throw e}
+    if(message)message.textContent='';
+  }catch(e){if(!cached?.data){setAppointmentVisibility(true);if(message)message.textContent=e?.message||'No fue posible cargar la agenda.'}throw e}
 }
-$('customer-appointment-branch').onchange=()=>{$('customer-appointment-date').value='';loadAppointmentModule().catch(()=>{})};
+$('customer-appointment-branch').onchange=()=>{$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';loadAppointmentModule().catch(()=>{})};
 $('customer-appointment-service').onchange=()=>{$('customer-appointment-date').value='';loadAppointmentDates()};
 
 $('next-appointment-date').onclick=async()=>{const next=$('next-appointment-date').dataset.date;if(next){customerMonth=next.slice(0,7);$('customer-appointment-date').value=next;await loadAppointmentDates();await loadAppointmentAvailability()}};
