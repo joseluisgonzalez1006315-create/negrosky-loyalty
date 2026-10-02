@@ -1,4 +1,4 @@
-const CACHE='negrosky-shell-v12';
+const CACHE='negrosky-shell-v13';
 const SHELL='/__negrosky_customer_shell__';
 self.addEventListener('install',event=>{event.waitUntil(self.skipWaiting())});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
