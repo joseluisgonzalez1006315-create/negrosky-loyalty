@@ -1261,7 +1261,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.174", "build": "174", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.175", "build": "175", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -3005,6 +3005,24 @@ def update_customer_profile(data: CustomerProfileInput, customer=Depends(current
     return {"customer": row_dict(updated), "message":"Perfil actualizado correctamente"}
 
 
+def ensure_public_branch(con, tenant_id: int):
+    """Provide one active principal branch for general businesses.
+
+    Reservations require a branch internally, even when the business has only
+    one general location. Reuse an existing Principal branch when present;
+    otherwise create a clearly named default branch.
+    """
+    active = con.execute("SELECT id FROM branches WHERE tenant_id=? AND status='active' ORDER BY id LIMIT 1", (tenant_id,)).fetchone()
+    if active:
+        return active["id"]
+    principal = con.execute("SELECT id FROM branches WHERE tenant_id=? AND LOWER(name)=LOWER(?) ORDER BY id LIMIT 1", (tenant_id, "Principal")).fetchone()
+    if principal:
+        con.execute("UPDATE branches SET status='active' WHERE id=?", (principal["id"],))
+        return principal["id"]
+    cur = con.execute("INSERT INTO branches (tenant_id,name,status,schedule_mode) VALUES (?,?,?,?)", (tenant_id, "Principal", "active", "inherit"))
+    return cur.lastrowid
+
+
 @app.get("/api/public/{slug}/branches")
 def public_branches(slug: str):
     with connection() as con:
@@ -3012,6 +3030,7 @@ def public_branches(slug: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
+        ensure_public_branch(con, tenant["id"])
         rows = con.execute("SELECT id, name, city, address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
     return [row_dict(row) for row in rows]
 
@@ -4677,7 +4696,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.174",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.175",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}

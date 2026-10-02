@@ -2668,6 +2668,24 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
     safe = row_dict(customer)
     return {"customer": safe, "access_token": create_customer_token(safe), "token_type": "bearer"}
 
+def ensure_public_branch(con, tenant_id: int):
+    """Provide one active principal branch for general businesses.
+
+    Reservations require a branch internally, even when the business has only
+    one general location. Reuse an existing Principal branch when present;
+    otherwise create a clearly named default branch.
+    """
+    active = con.execute("SELECT id FROM branches WHERE tenant_id=? AND status='active' ORDER BY id LIMIT 1", (tenant_id,)).fetchone()
+    if active:
+        return active["id"]
+    principal = con.execute("SELECT id FROM branches WHERE tenant_id=? AND LOWER(name)=LOWER(?) ORDER BY id LIMIT 1", (tenant_id, "Principal")).fetchone()
+    if principal:
+        con.execute("UPDATE branches SET status='active' WHERE id=?", (principal["id"],))
+        return principal["id"]
+    cur = con.execute("INSERT INTO branches (tenant_id,name,status,schedule_mode) VALUES (?,?,?,?)", (tenant_id, "Principal", "active", "inherit"))
+    return cur.lastrowid
+
+
 @app.get("/api/public/{slug}/branches")
 def public_branches(slug: str):
     with connection() as con:
@@ -2675,6 +2693,7 @@ def public_branches(slug: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
+        ensure_public_branch(con, tenant["id"])
         rows = con.execute("SELECT id, name, city, address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
     return [row_dict(row) for row in rows]
 
