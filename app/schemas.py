@@ -300,6 +300,8 @@ class CollaborationCreateInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str = Field(default="", max_length=500)
     image_url: str | None = Field(default=None, max_length=2_500_000)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     ends_at: str | None = Field(default=None, max_length=40)
     ad_seconds: int = Field(default=5, ge=1, le=60)
 
@@ -307,6 +309,8 @@ class CollaborationUpdateInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str = Field(default="", max_length=500)
     image_url: str | None = Field(default=None, max_length=2_500_000)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     ends_at: str | None = Field(default=None, max_length=40)
     ad_seconds: int = Field(default=5, ge=1, le=60)
 

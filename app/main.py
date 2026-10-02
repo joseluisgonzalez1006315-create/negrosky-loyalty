@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.163")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.164")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1261,7 +1261,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.163", "build": "163", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.164", "build": "164", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1514,6 +1514,8 @@ def ensure_ad_target_url_column():
             con.execute("ALTER TABLE platform_ads ADD COLUMN IF NOT EXISTS target_label TEXT")
             con.execute("ALTER TABLE business_ads ADD COLUMN IF NOT EXISTS target_url TEXT")
             con.execute("ALTER TABLE business_ads ADD COLUMN IF NOT EXISTS target_label TEXT")
+            con.execute("ALTER TABLE collaborations ADD COLUMN IF NOT EXISTS target_url TEXT")
+            con.execute("ALTER TABLE collaborations ADD COLUMN IF NOT EXISTS target_label TEXT")
         else:
             for table in ("platform_ads", "business_ads"):
                 columns = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
@@ -1521,6 +1523,10 @@ def ensure_ad_target_url_column():
                     con.execute(f"ALTER TABLE {table} ADD COLUMN target_url TEXT")
                 if "target_label" not in columns:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN target_label TEXT")
+            collaboration_columns = {row[1] for row in con.execute("PRAGMA table_info(collaborations)")}
+            for name in ("target_url", "target_label"):
+                if name not in collaboration_columns:
+                    con.execute(f"ALTER TABLE collaborations ADD COLUMN {name} TEXT")
 
 
 def _platform_ad_dict(row):
@@ -4189,8 +4195,8 @@ def create_collaboration(data: CollaborationCreateInput, user=Depends(require("s
         contact = con.execute("SELECT 1 FROM collaboration_contacts WHERE tenant_id=? AND visible=1", (data.partner_tenant_id,)).fetchone()
         if not partner or not contact:
             raise HTTPException(status_code=422, detail="Ese negocio no está disponible para colaboraciones")
-        cur = con.execute("""INSERT INTO collaborations(requester_tenant_id,partner_tenant_id,title,message,image_url,ends_at,ad_seconds,is_active)
-            VALUES(?,?,?,?,?,?,?,1)""", (scope, data.partner_tenant_id, data.title.strip(), data.message.strip(), image_url, collaboration_end(data.ends_at), data.ad_seconds))
+        cur = con.execute("""INSERT INTO collaborations(requester_tenant_id,partner_tenant_id,title,message,image_url,ends_at,ad_seconds,target_url,target_label,is_active)
+            VALUES(?,?,?,?,?,?,?,?,?,1)""", (scope, data.partner_tenant_id, data.title.strip(), data.message.strip(), image_url, collaboration_end(data.ends_at), data.ad_seconds, _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None))
     return {"id": cur.lastrowid, "status": "pending"}
 
 @app.put("/api/collaborations/{collaboration_id}")
@@ -4202,8 +4208,8 @@ def edit_collaboration(collaboration_id: int, data: CollaborationUpdateInput, us
         scope = collaboration_scope(row, user)
         require_user_module(con, user, "collaborations")
         image_url = collaboration_image(data.image_url) if data.image_url else row["image_url"]
-        con.execute("""UPDATE collaborations SET title=?,message=?,image_url=?,ends_at=?,ad_seconds=?,updated_at=CURRENT_TIMESTAMP
-            WHERE id=?""", (data.title.strip(), data.message.strip(), image_url, collaboration_end(data.ends_at), data.ad_seconds, collaboration_id))
+        con.execute("""UPDATE collaborations SET title=?,message=?,image_url=?,ends_at=?,ad_seconds=?,target_url=?,target_label=?,updated_at=CURRENT_TIMESTAMP
+            WHERE id=?""", (data.title.strip(), data.message.strip(), image_url, collaboration_end(data.ends_at), data.ad_seconds, _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None, collaboration_id))
     return {"saved": True, "id": collaboration_id, "tenant_id": scope}
 
 @app.delete("/api/collaborations/{collaboration_id}")
@@ -4248,7 +4254,7 @@ def public_collaborations(slug: str):
         tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
         if not tenant or not module_enabled(con, tenant["id"], "public_page") or not module_enabled(con, tenant["id"], "collaborations"):
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        rows = con.execute("""SELECT c.id,c.title,c.message,c.image_url,c.created_at,c.ends_at,c.ad_seconds,c.is_active,
+        rows = con.execute("""SELECT c.id,c.title,c.message,c.image_url,c.target_url,c.target_label,c.created_at,c.ends_at,c.ad_seconds,c.is_active,
             CASE WHEN c.requester_tenant_id=? THEN b.name ELSE a.name END partner_name
             FROM collaborations c JOIN tenants a ON a.id=c.requester_tenant_id JOIN tenants b ON b.id=c.partner_tenant_id
             WHERE (c.requester_tenant_id=? OR c.partner_tenant_id=?) AND c.requester_status='accepted' AND c.partner_status='accepted' AND c.is_active=1""",
@@ -4671,7 +4677,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.163",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.164",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}

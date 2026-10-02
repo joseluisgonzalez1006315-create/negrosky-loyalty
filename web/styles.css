@@ -374,3 +374,5 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.dashboard{width:100%;max-
 .platform-ad-overlay .platform-ad img{display:block;width:auto;max-width:100%;height:auto;max-height:55vh;object-fit:contain;background:transparent;margin:8px auto 14px;border-radius:14px}
 
 .collaboration-overlay .collaboration-ad{position:relative}.collaboration-overlay .collaboration-close{position:absolute;top:10px;right:10px;z-index:10}
+
+.platform-ad-overlay .platform-ad,.collaboration-overlay .collaboration-ad{box-sizing:border-box}.collaboration-overlay .collaboration-close{top:8px!important;right:8px!important;display:grid;place-items:center;line-height:1;transform:none}.collaboration-overlay .collaboration-ad img{width:auto;max-width:100%;height:auto;max-height:52vh;object-fit:contain;background:transparent;margin:8px auto 14px}
