@@ -3223,6 +3223,23 @@ def public_appointment_services(slug: str, branch_id: int):
     return [row_dict(row) for row in rows]
 
 
+
+@app.get("/api/public/{slug}/appointment-bootstrap")
+def appointment_bootstrap(slug: str):
+    """Load branches and active appointment services in one request."""
+    with connection() as con:
+        tenant = con.execute("SELECT * FROM tenants WHERE slug=? AND status='active'", (slug,)).fetchone()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+        require_public_module(con, tenant["id"], "public_page")
+        ensure_public_branch(con, tenant["id"])
+        branches = con.execute("SELECT id,name,city,address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
+        if not module_enabled(con, tenant["id"], "appointments") and not any(module_enabled(con, tenant["id"], "appointments", branch["id"]) for branch in branches):
+            raise HTTPException(status_code=404, detail="Agenda de citas no disponible")
+        services = con.execute("""SELECT id,name,duration_minutes,price,branch_id FROM appointment_services
+            WHERE tenant_id=? AND status='active' ORDER BY name""", (tenant["id"],)).fetchall()
+    return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services]}
+
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
                               stop_at_first=False):
     branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",

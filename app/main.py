@@ -1261,7 +1261,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.176", "build": "176", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.177", "build": "177", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -3629,6 +3629,23 @@ def public_appointment_services(slug: str, branch_id: int):
     return [row_dict(row) for row in rows]
 
 
+
+@app.get("/api/public/{slug}/appointment-bootstrap")
+def appointment_bootstrap(slug: str):
+    """Load branches and active appointment services in one request."""
+    with connection() as con:
+        tenant = con.execute("SELECT * FROM tenants WHERE slug=? AND status='active'", (slug,)).fetchone()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+        require_public_module(con, tenant["id"], "public_page")
+        ensure_public_branch(con, tenant["id"])
+        branches = con.execute("SELECT id,name,city,address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
+        if not module_enabled(con, tenant["id"], "appointments") and not any(module_enabled(con, tenant["id"], "appointments", branch["id"]) for branch in branches):
+            raise HTTPException(status_code=404, detail="Agenda de citas no disponible")
+        services = con.execute("""SELECT id,name,duration_minutes,price,branch_id FROM appointment_services
+            WHERE tenant_id=? AND status='active' ORDER BY name""", (tenant["id"],)).fetchall()
+    return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services]}
+
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
                               stop_at_first=False):
     branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
@@ -4696,7 +4713,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.176",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.177",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
