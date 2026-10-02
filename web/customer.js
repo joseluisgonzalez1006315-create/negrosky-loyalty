@@ -6,7 +6,7 @@ try{const viewKey=`negrosky_analytics_view_${slug}`;if(!sessionStorage.getItem(v
 if(token)document.body.classList.add('customer-authenticated');
 if(!token){const hidePreLoginRoulette=()=>document.getElementById('customer-roulette')?.classList.add('hidden');hidePreLoginRoulette()}
 let deferredInstallPrompt=null;
-if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js?v=8').catch(()=>{});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js?v=9').catch(()=>{});
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredInstallPrompt=event;document.getElementById('install-customer-app')?.classList.remove('hidden')});
 function setupCustomerInstall(){const nav=$('customer-quick-actions');if(!nav||$('install-customer-app'))return;const button=document.createElement('button');button.id='install-customer-app';button.type='button';button.className='install-action';button.textContent='📲 Instalar';button.onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;return}alert('En iPhone: pulsa Compartir y luego “Agregar a pantalla de inicio”. En Android: abre el menú del navegador y elige “Instalar aplicación”.')};nav.appendChild(button)}
 function base64ToBytes(value){const pad='='.repeat((4-value.length%4)%4),raw=atob((value+pad).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(raw,c=>c.charCodeAt(0))}
