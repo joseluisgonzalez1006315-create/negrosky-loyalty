@@ -222,6 +222,8 @@ async function loadCustomerAppointmentServices(){
 }
 let customerMonth=null;
 const customerCalendarCachePrefix=()=>`negrosky_appointment_calendar_${slug}`;
+const appointmentCalendarRequests=new Map();
+let appointmentModulePromise=null;
 function renderCustomerDates(data){
   const month=data.month,[year,number]=month.split('-').map(Number);
   const first=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
@@ -241,22 +243,33 @@ function renderCustomerDates(data){
   $('customer-calendar-next').disabled=month>=ES.dayKey(new Date(Date.now()+180*86400000),data.timezone).slice(0,7);
   if(!Object.keys(data.days).length)$('appointment-availability').textContent='Este mes no tiene citas disponibles. Revisa el mes siguiente.';
 }
-async function loadAppointmentDates(){
+async function refreshAppointmentDates(){
   const branch=+$('customer-appointment-branch').value,service=+$('customer-appointment-service').value;
   if(!branch||!service)return;
   customerMonth??=ES.dayKey(new Date(),customerTimeZone).slice(0,7);
   const month=customerMonth, key=`${customerCalendarCachePrefix()}_${branch}_${service}_${month}`;
-  let cached=null;try{cached=JSON.parse(sessionStorage.getItem(key)||'null')}catch(_){}
-  if(cached?.data&&Date.now()-Number(cached.saved_at||0)<60000){
+  let cached=null;try{cached=JSON.parse(localStorage.getItem(key)||'null')}catch(_){}
+  if(cached?.data&&Date.now()-Number(cached.saved_at||0)<180000){
     customerTimeZone=cached.data.timezone;renderCustomerDates(cached.data);
     if($('customer-appointment-date').value)loadAppointmentAvailability().catch(()=>{});
   }else $('customer-calendar-days').textContent='Buscando fechas disponibles…';
   try{const data=await api(`/api/public/${slug}/appointment-calendar?branch_id=${branch}&service_id=${service}&month=${month}`);
     if(branch!==+$('customer-appointment-branch').value||service!==+$('customer-appointment-service').value||month!==customerMonth)return;
-    try{sessionStorage.setItem(key,JSON.stringify({saved_at:Date.now(),data}))}catch(_){}
+    try{localStorage.setItem(key,JSON.stringify({saved_at:Date.now(),data}))}catch(_){}
     customerTimeZone=data.timezone;renderCustomerDates(data);
     if($('customer-appointment-date').value)await loadAppointmentAvailability();
   }catch(e){if(!cached?.data){$('customer-calendar-days').textContent=e.message;showToast(e.message,'error')}}
+}
+
+async function loadAppointmentDates(){
+  const branch=+$('customer-appointment-branch').value,service=+$('customer-appointment-service').value;
+  if(!branch||!service)return;
+  customerMonth??=ES.dayKey(new Date(),customerTimeZone).slice(0,7);
+  const key=`${customerCalendarCachePrefix()}_${branch}_${service}_${customerMonth}`;
+  if(appointmentCalendarRequests.has(key))return appointmentCalendarRequests.get(key);
+  const request=refreshAppointmentDates().finally(()=>appointmentCalendarRequests.delete(key));
+  appointmentCalendarRequests.set(key,request);
+  return request;
 }
 $('customer-calendar-days').onclick=event=>{const button=event.target.closest('[data-book-date]');if(!button||button.disabled)return;$('customer-appointment-date').value=button.dataset.bookDate;$('customer-chosen-date').textContent=`Fecha seleccionada: ${new Intl.DateTimeFormat('es-CO',{dateStyle:'full',timeZone:'UTC'}).format(new Date(button.dataset.bookDate+'T12:00:00Z'))}`;document.querySelectorAll('[data-book-date]').forEach(item=>item.classList.toggle('selected',item===button));loadAppointmentAvailability()};
 function moveCustomerMonth(offset){const [year,number]=(customerMonth||ES.dayKey(new Date(),customerTimeZone).slice(0,7)).split('-').map(Number);const next=new Date(Date.UTC(year,number-1+offset,1));customerMonth=`${next.getUTCFullYear()}-${String(next.getUTCMonth()+1).padStart(2,'0')}`;$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';loadAppointmentDates()}
@@ -299,7 +312,7 @@ function renderAppointmentBootstrap(data,profile){
   if(!eligible.length){$('customer-calendar-days').textContent='No hay servicios activos para esta sucursal.';if(message)message.textContent='Configura un servicio activo en Agenda de citas.';return false}
   return true;
 }
-async function loadAppointmentModule(profile=null){
+async function _loadAppointmentModule(profile=null){
   if(!token||!customerModuleEnabled('appointments')){setAppointmentVisibility(false);return}
   const message=$('customer-appointment-message'),cacheKey=`negrosky_appointment_bootstrap_${slug}`,now=Date.now();
   let cached=null;try{cached=JSON.parse(localStorage.getItem(cacheKey)||'null')}catch(_){cached=null}
@@ -314,6 +327,11 @@ async function loadAppointmentModule(profile=null){
     await Promise.all([loadAppointmentDates(),loadMyAppointments()]);
     if(message)message.textContent='';
   }catch(e){if(!cached?.data){setAppointmentVisibility(true);if(message)message.textContent=e?.message||'No fue posible cargar la agenda.'}throw e}
+}
+async function loadAppointmentModule(profile=null){
+  if(appointmentModulePromise)return appointmentModulePromise;
+  appointmentModulePromise=_loadAppointmentModule(profile);
+  try{return await appointmentModulePromise}finally{appointmentModulePromise=null}
 }
 $('customer-appointment-branch').onchange=()=>{$('customer-appointment-date').value='';$('customer-appointment-time').innerHTML='<option value="">Escoge una fecha primero</option>';loadAppointmentModule().catch(()=>{})};
 $('customer-appointment-service').onchange=()=>{$('customer-appointment-date').value='';loadAppointmentDates()};
