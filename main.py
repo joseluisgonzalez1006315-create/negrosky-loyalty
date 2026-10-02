@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.184")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.185")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
@@ -1007,7 +1007,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.184", "build": "184", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.185", "build": "185", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
