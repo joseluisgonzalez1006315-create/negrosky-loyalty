@@ -1,0 +1,14 @@
+{
+  "name": "NEGROSKY Tarjeta Digital",
+  "short_name": "NEGROSKY",
+  "description": "Tarjeta digital de fidelización NEGROSKY",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07070d",
+  "theme_color": "#7c3aed",
+  "lang": "es-CO",
+  "icons": [
+    {"src":"/static/pwa-icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
