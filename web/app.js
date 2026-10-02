@@ -222,6 +222,7 @@ $('appointment-tenant').onchange=()=>{calendarCursor=null;calendarSelected=null;
 
 let adminNotificationItems=[];
 function notificationDateValue(value){
+ if(window.NegroskyES?.parseDate){const parsed=window.NegroskyES.parseDate(value);if(parsed)return parsed}
  if(value===null||value===undefined||value==='')return null;
  if(value instanceof Date)return Number.isNaN(value.getTime())?null:value;
  if(typeof value==='number'){const ms=value<100000000000?value*1000:value;const d=new Date(ms);return Number.isNaN(d.getTime())?null:d}
