@@ -11,6 +11,7 @@ import csv
 import shutil
 import socket
 import zipfile
+import hashlib
 from math import ceil
 from datetime import date, datetime, timedelta, timezone
 import ipaddress
@@ -35,7 +36,7 @@ from .schemas import (
     BrandingInput, BrandingLogoInput, BrandingBackgroundInput, ProgramIconInput,
     TimeServiceInput, TimeServiceStatusInput, TimeSessionStartInput, TimeSessionCloseInput,
     RaffleInput, RaffleTicketInput, RaffleStatusInput, RouletteInput, RouletteStatusInput, ModuleSettingsInput,
-    NotificationSendInput, PushSubscriptionInput, CollaborationContactInput, CollaborationCreateInput, CollaborationUpdateInput, CollaborationStatusInput, CollaborationActiveInput, WorkerAccessInput, PlatformAdInput, BusinessAdInput, BirthdaySettingsInput,
+    NotificationSendInput, PushSubscriptionInput, CollaborationContactInput, CollaborationCreateInput, CollaborationUpdateInput, CollaborationStatusInput, CollaborationActiveInput, WorkerAccessInput, PlatformAdInput, BusinessAdInput, BirthdaySettingsInput, AnalyticsEventInput,
 )
 from .security import create_customer_token, create_token, decode_token, hash_password, verify_password
 
@@ -43,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.152")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.155")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -567,6 +568,51 @@ def normalize_landing_link(value, kind):
     return value
 
 
+def ensure_analytics_table():
+    """Create analytics storage on both local SQLite and cloud PostgreSQL."""
+    with connection() as con:
+        if using_postgres():
+            con.execute("""CREATE TABLE IF NOT EXISTS analytics_events (
+                id BIGSERIAL PRIMARY KEY,
+                tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                event_type TEXT NOT NULL,
+                visitor_key TEXT NOT NULL,
+                session_key TEXT,
+                ad_source TEXT,
+                ad_id BIGINT,
+                ad_title TEXT,
+                page_path TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+        else:
+            con.execute("""CREATE TABLE IF NOT EXISTS analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                visitor_key TEXT NOT NULL,
+                session_key TEXT,
+                ad_source TEXT,
+                ad_id INTEGER,
+                ad_title TEXT,
+                page_path TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+            )""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_analytics_tenant_date ON analytics_events(tenant_id, created_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_analytics_ad ON analytics_events(tenant_id, ad_source, ad_id, created_at)")
+        if using_postgres():
+            con.execute("""CREATE TABLE IF NOT EXISTS platform_analytics_events (
+                id BIGSERIAL PRIMARY KEY, visitor_key TEXT NOT NULL,
+                session_key TEXT, page_path TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+        else:
+            con.execute("""CREATE TABLE IF NOT EXISTS platform_analytics_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, visitor_key TEXT NOT NULL,
+                session_key TEXT, page_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_platform_analytics_date ON platform_analytics_events(created_at)")
+
+
 @app.on_event("startup")
 def startup():
     global _maintenance_task
@@ -576,6 +622,7 @@ def startup():
     sync_module_defaults()
     ensure_general_business_purchases()
     ensure_runtime_indexes()
+    ensure_analytics_table()
     bootstrap_admin()
     # Se ejecuta una vez al iniciar y luego cada 24 horas. Si el proceso se
     # reinicia, vuelve a comprobar la copia del día sin crear otra histórica.
@@ -1213,7 +1260,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.152", "build": "152", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.155", "build": "155", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4210,6 +4257,99 @@ def public_platform_ads(slug: str):
     result.extend([{**row_dict(row), "source": "business"} for row in business_rows])
     return result
 
+
+@app.post("/api/public/{slug}/analytics")
+def record_public_analytics(slug: str, data: AnalyticsEventInput, request: Request):
+    """Record anonymous public-page and advertising events.
+
+    The browser sends a random local key. It is hashed before storage and never
+    contains a customer name, phone number or account token.
+    """
+    visitor = hashlib.sha256(data.visitor_key.encode("utf-8")).hexdigest()
+    session = hashlib.sha256(data.session_key.encode("utf-8")).hexdigest() if data.session_key else None
+    source = (data.ad_source or "")[:30].lower() or None
+    if source not in (None, "platform", "business", "collaboration"):
+        source = None
+    with connection() as con:
+        tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
+        if not tenant or not module_enabled(con, tenant["id"], "public_page"):
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+        con.execute("""INSERT INTO analytics_events
+            (tenant_id,event_type,visitor_key,session_key,ad_source,ad_id,ad_title,page_path)
+            VALUES (?,?,?,?,?,?,?,?)""", (tenant["id"], data.event_type, visitor, session,
+            source, data.ad_id, (data.ad_title or "")[:180] or None, (data.page_path or str(request.url.path))[:300]))
+    return {"ok": True}
+
+
+@app.post("/api/public/landing-analytics")
+def record_landing_analytics(data: AnalyticsEventInput):
+    if data.event_type != "page_view":
+        raise HTTPException(status_code=422, detail="Evento no permitido")
+    visitor = hashlib.sha256(data.visitor_key.encode("utf-8")).hexdigest()
+    session = hashlib.sha256(data.session_key.encode("utf-8")).hexdigest() if data.session_key else None
+    with connection() as con:
+        con.execute("INSERT INTO platform_analytics_events(visitor_key,session_key,page_path) VALUES(?,?,?)", (visitor, session, (data.page_path or "/inicio")[:300]))
+    return {"ok": True}
+
+
+@app.get("/api/analytics")
+def get_analytics(days: int = 30, tenant_id: int | None = None,
+                  user=Depends(require("super_admin", "business_admin", "branch_admin"))):
+    days = max(1, min(int(days or 30), 365))
+    scope = tenant_scope(user, tenant_id)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d 00:00:00")
+    with connection() as con:
+        tenant = con.execute("SELECT id,name,slug FROM tenants WHERE id=?", (scope,)).fetchone()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+        rows = con.execute("""SELECT event_type,visitor_key,ad_source,ad_id,ad_title,created_at
+            FROM analytics_events WHERE tenant_id=? AND created_at>=?
+            ORDER BY created_at DESC""", (scope, cutoff)).fetchall()
+        platform_rows = con.execute("""SELECT id,title,target_tenants_json,starts_at,ends_at,is_active
+            FROM platform_ads WHERE is_active=1""").fetchall()
+        business_rows = con.execute("""SELECT id,title,starts_at,ends_at,is_active
+            FROM business_ads WHERE tenant_id=? AND is_active=1""", (scope,)).fetchall()
+        landing_rows = con.execute("""SELECT visitor_key,event_type FROM platform_analytics_events
+            WHERE created_at>=?""", (cutoff,)).fetchall()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    def active_window(row):
+        def parse(value):
+            if not value: return None
+            try: return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError: return None
+        start, end = parse(row["starts_at"]), parse(row["ends_at"])
+        return (not start or start <= now) and (not end or end >= now)
+    active_ads = []
+    for row in platform_rows:
+        try: targets = json.loads(row["target_tenants_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError): targets = []
+        if (not targets or scope in targets) and active_window(row):
+            active_ads.append({"id": row["id"], "source": "platform", "title": row["title"]})
+    for row in business_rows:
+        if active_window(row): active_ads.append({"id": row["id"], "source": "business", "title": row["title"]})
+    daily, ads, visitors = {}, {}, set()
+    for row in rows:
+        event, visitor = row["event_type"], row["visitor_key"]
+        if event == "page_view": visitors.add(visitor)
+        day = str(row["created_at"] or "")[:10] or "Sin fecha"
+        bucket = daily.setdefault(day, {"date": day, "visits": 0, "unique_visitors": set(), "ad_impressions": 0})
+        if event == "page_view": bucket["visits"] += 1; bucket["unique_visitors"].add(visitor)
+        elif event == "ad_impression": bucket["ad_impressions"] += 1
+        if event in ("ad_impression", "ad_close") and row["ad_id"]:
+            key = (row["ad_source"] or "platform", int(row["ad_id"]))
+            ad = ads.setdefault(key, {"id": int(row["ad_id"]), "source": key[0], "title": row["ad_title"] or "Publicidad", "impressions": 0, "unique_viewers": set(), "closes": 0})
+            if event == "ad_impression": ad["impressions"] += 1; ad["unique_viewers"].add(visitor)
+            else: ad["closes"] += 1
+    for item in active_ads:
+        ads.setdefault((item["source"], item["id"]), {"id": item["id"], "source": item["source"], "title": item["title"], "impressions": 0, "unique_viewers": set(), "closes": 0})
+    daily_out = [{**v, "unique_visitors": len(v["unique_visitors"])} for v in sorted(daily.values(), key=lambda x: x["date"], reverse=True)]
+    ads_out = [{**v, "unique_viewers": len(v["unique_viewers"])} for v in ads.values()]
+    return {"tenant": row_dict(tenant), "days": days, "visits": sum(1 for x in rows if x["event_type"] == "page_view"),
+            "unique_visitors": len(visitors), "ad_impressions": sum(1 for x in rows if x["event_type"] == "ad_impression"),
+            "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"), "active_ads": active_ads,
+            "has_active_ads": bool(active_ads), "landing_visits": sum(1 for x in landing_rows if x["event_type"] == "page_view"),
+            "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}), "daily": daily_out, "ads": ads_out}
+
 @app.post("/api/notifications/read-all")
 def read_all_notifications(tenant_id: int | None = None,
                            user=Depends(require("super_admin", "business_admin", "branch_admin"))):
@@ -4500,7 +4640,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.148",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.155",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}

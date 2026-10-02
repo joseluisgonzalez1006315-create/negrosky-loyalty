@@ -428,3 +428,13 @@ class TimeSessionStartInput(BaseModel):
     service_id: int
     customer_id: int
 class TimeSessionCloseInput(BaseModel): notes: str | None = Field(default=None, max_length=500)
+
+
+class AnalyticsEventInput(BaseModel):
+    event_type: Literal["page_view", "ad_impression", "ad_close"]
+    visitor_key: str = Field(min_length=8, max_length=160)
+    session_key: str | None = Field(default=None, max_length=160)
+    ad_source: str | None = Field(default=None, max_length=30)
+    ad_id: int | None = Field(default=None, ge=1)
+    ad_title: str | None = Field(default=None, max_length=180)
+    page_path: str | None = Field(default=None, max_length=300)

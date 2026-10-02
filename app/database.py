@@ -727,6 +727,23 @@ def init_db() -> None:
             updated_at TEXT,
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            visitor_key TEXT NOT NULL,
+            session_key TEXT,
+            ad_source TEXT,
+            ad_id INTEGER,
+            ad_title TEXT,
+            page_path TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_analytics_tenant_date
+            ON analytics_events(tenant_id, created_at)""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_analytics_ad
+            ON analytics_events(tenant_id, ad_source, ad_id, created_at)""")
         con.execute("""CREATE TABLE IF NOT EXISTS tenant_onboarding (
             tenant_id INTEGER PRIMARY KEY,
             completed INTEGER NOT NULL DEFAULT 0,
