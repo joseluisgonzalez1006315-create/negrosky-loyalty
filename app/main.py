@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.155")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.156")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1260,7 +1260,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.155", "build": "155", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.156", "build": "156", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4265,6 +4265,7 @@ def record_public_analytics(slug: str, data: AnalyticsEventInput, request: Reque
     The browser sends a random local key. It is hashed before storage and never
     contains a customer name, phone number or account token.
     """
+    ensure_analytics_table()
     visitor = hashlib.sha256(data.visitor_key.encode("utf-8")).hexdigest()
     session = hashlib.sha256(data.session_key.encode("utf-8")).hexdigest() if data.session_key else None
     source = (data.ad_source or "")[:30].lower() or None
@@ -4285,6 +4286,7 @@ def record_public_analytics(slug: str, data: AnalyticsEventInput, request: Reque
 def record_landing_analytics(data: AnalyticsEventInput):
     if data.event_type != "page_view":
         raise HTTPException(status_code=422, detail="Evento no permitido")
+    ensure_analytics_table()
     visitor = hashlib.sha256(data.visitor_key.encode("utf-8")).hexdigest()
     session = hashlib.sha256(data.session_key.encode("utf-8")).hexdigest() if data.session_key else None
     with connection() as con:
@@ -4295,6 +4297,7 @@ def record_landing_analytics(data: AnalyticsEventInput):
 @app.get("/api/analytics")
 def get_analytics(days: int = 30, tenant_id: int | None = None,
                   user=Depends(require("super_admin", "business_admin", "branch_admin"))):
+    ensure_analytics_table()
     days = max(1, min(int(days or 30), 365))
     scope = tenant_scope(user, tenant_id)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days - 1)).strftime("%Y-%m-%d 00:00:00")
@@ -4640,7 +4643,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.155",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.156",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
