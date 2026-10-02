@@ -897,7 +897,7 @@ def init_db() -> None:
         con.execute("UPDATE users SET username=lower(substr(email,1,instr(email,'@')-1)) WHERE username IS NULL AND instr(email,'@')>1 AND NOT EXISTS (SELECT 1 FROM users other WHERE other.id!=users.id AND lower(other.username)=lower(substr(users.email,1,instr(users.email,'@')-1)))")
         customer_columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
         for name, definition in {
-            "notes": "TEXT", "tags": "TEXT", "created_by_user_id": "INTEGER", "merged_into_id": "INTEGER", "search_key": "TEXT"
+            "notes": "TEXT", "tags": "TEXT", "created_by_user_id": "INTEGER", "merged_into_id": "INTEGER", "search_key": "TEXT", "deleted_at": "TEXT"
         }.items():
             if name not in customer_columns:
                 con.execute(f"ALTER TABLE customers ADD COLUMN {name} {definition}")

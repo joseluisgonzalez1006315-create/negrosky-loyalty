@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.164")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.186")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -661,8 +661,14 @@ def current_user(authorization: str | None = Header(default=None)) -> dict:
         # Algunas conexiones PostgreSQL pueden no devolver inmediatamente la sesión
         # recién creada. El token firmado sigue validando identidad y expiración;
         # si la fila existe, se valida además su revocación.
-        if session and datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
-            raise HTTPException(status_code=401, detail="Sesión cerrada o vencida")
+        if session:
+            expires_at = session["expires_at"]
+            if not isinstance(expires_at, datetime):
+                expires_at = datetime.fromisoformat(str(expires_at))
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < datetime.now(timezone.utc):
+                raise HTTPException(status_code=401, detail="Sesión cerrada o vencida")
         user = con.execute(
             """SELECT id, tenant_id, branch_id, name, username, email, email_optional,
             role, status, force_password_change
@@ -1261,7 +1267,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.185", "build": "185", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.186", "build": "186", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -2515,12 +2521,90 @@ def list_customers(tenant_id: int | None = None, q: str | None = None,
             """SELECT c.id, c.tenant_id, c.name, c.phone, c.marketing_consent, c.birth_date, c.birthday_consent, c.status, c.created_at,
             b.name AS origin_branch_name, t.name AS business_name FROM customers c
             JOIN tenants t ON t.id=c.tenant_id LEFT JOIN branches b ON b.id=c.origin_branch_id
-            WHERE c.tenant_id=? AND (?='' OR c.search_key LIKE ? OR replace(replace(c.phone,' ',''),'+','') LIKE ?)
+            WHERE c.tenant_id=? AND c.status='active' AND (?='' OR c.search_key LIKE ? OR replace(replace(c.phone,' ',''),'+','') LIKE ?)
             ORDER BY c.search_key, c.id LIMIT 200""",
             (scope, normalized, search, phone_search),
         ).fetchall()
     return [row_dict(r) for r in rows]
 
+
+
+@app.get("/api/customers/trash")
+def list_customer_trash(tenant_id: int | None = None,
+                        user=Depends(require("super_admin", "business_admin"))):
+    scope = tenant_scope(user, tenant_id)
+    with connection() as con:
+        rows = con.execute(
+            """SELECT c.id,c.tenant_id,c.name,c.phone,c.status,c.deleted_at,c.created_at,
+            t.name AS business_name FROM customers c JOIN tenants t ON t.id=c.tenant_id
+            WHERE c.tenant_id=? AND c.status IN ('trashed','deleted')
+            ORDER BY c.deleted_at DESC, c.id DESC LIMIT 300""", (scope,)
+        ).fetchall()
+    return [row_dict(row) for row in rows]
+
+
+@app.delete("/api/customers/{customer_id}")
+def trash_customer(customer_id: int,
+                   user=Depends(require("super_admin", "business_admin"))):
+    with connection() as con:
+        customer = con.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not customer:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        tenant_scope(user, customer["tenant_id"])
+        if customer["status"] == "trashed":
+            raise HTTPException(status_code=409, detail="El cliente ya está en la papelera")
+        if customer["status"] == "deleted":
+            raise HTTPException(status_code=409, detail="El cliente ya fue eliminado")
+        con.execute("UPDATE customers SET status='trashed', deleted_at=CURRENT_TIMESTAMP WHERE id=?", (customer_id,))
+        audit(con, user, "trash", "customer", customer_id, {"phone": customer["phone"]})
+    return {"status": "trashed", "id": customer_id, "data_preserved": True}
+
+
+@app.put("/api/customers/{customer_id}/restore")
+def restore_customer(customer_id: int,
+                     user=Depends(require("super_admin", "business_admin"))):
+    with connection() as con:
+        customer = con.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not customer:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado en la papelera")
+        tenant_scope(user, customer["tenant_id"])
+        if customer["status"] != "trashed":
+            raise HTTPException(status_code=409, detail="El cliente no está en la papelera")
+        duplicate = con.execute("SELECT id FROM customers WHERE tenant_id=? AND phone=? AND status='active' AND id<>?", (customer["tenant_id"], customer["phone"], customer_id)).fetchone()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Ya existe un cliente activo con ese celular")
+        con.execute("UPDATE customers SET status='active', deleted_at=NULL WHERE id=?", (customer_id,))
+        audit(con, user, "restore", "customer", customer_id)
+    return {"status": "active", "id": customer_id}
+
+
+@app.delete("/api/customers/{customer_id}/permanent")
+def permanently_delete_customer(customer_id: int,
+                                user=Depends(require("super_admin"))):
+    backup = create_backup("customer_delete")
+    with connection() as con:
+        customer = con.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        if not customer:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        if customer["status"] != "trashed":
+            raise HTTPException(status_code=409, detail="Primero envía el cliente a la papelera")
+        tenant_scope(user, customer["tenant_id"])
+        cid, phone = customer["id"], customer["phone"]
+        # Se eliminan primero las tablas dependientes para respetar las claves foráneas.
+        con.execute("DELETE FROM operation_token_rewards WHERE operation_token_id IN (SELECT id FROM operation_tokens WHERE customer_id=?)", (cid,))
+        con.execute("DELETE FROM purchases WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM operation_tokens WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM raffle_operation_tokens WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM raffle_tickets WHERE customer_phone=? AND raffle_id IN (SELECT id FROM raffles WHERE tenant_id=?)", (phone, customer["tenant_id"]))
+        con.execute("DELETE FROM rewards WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM loyalty_cards WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM appointments WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM time_sessions WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM notifications WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM push_subscriptions WHERE customer_id=?", (cid,))
+        con.execute("DELETE FROM audit_logs WHERE entity_type='customer' AND entity_id=?", (cid,))
+        con.execute("DELETE FROM customers WHERE id=?", (cid,))
+    return {"status": "deleted", "id": customer_id, "backup": backup.name}
 
 @app.get("/api/birthday-settings")
 def get_birthday_settings(tenant_id: int | None = None, user=Depends(require("super_admin", "business_admin", "branch_admin"))):
@@ -2962,7 +3046,7 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
         customer = con.execute("SELECT * FROM customers WHERE tenant_id=? AND phone=?", (tenant["id"], phone)).fetchone()
         if customer:
             con.execute(
-                "UPDATE customers SET name=?, search_key=?, marketing_consent=?, origin_branch_id=?, birth_date=COALESCE(?,birth_date), birthday_consent=COALESCE(?,birthday_consent) WHERE id=?",
+                "UPDATE customers SET name=?, search_key=?, marketing_consent=?, origin_branch_id=?, birth_date=COALESCE(?,birth_date), birthday_consent=COALESCE(?,birthday_consent), status='active', deleted_at=NULL WHERE id=?",
                 (customer_name, normalize_search(customer_name), int(data.marketing_consent), data.branch_id if data.branch_id is not None else customer["origin_branch_id"], data.birth_date, None if data.birthday_consent is None else int(data.birthday_consent), customer["id"]),
             )
             customer = con.execute("SELECT * FROM customers WHERE id=?", (customer["id"],)).fetchone()
@@ -4491,6 +4575,27 @@ def read_all_notifications(tenant_id: int | None = None,
     return {"status": "read", "count": cur.rowcount}
 
 
+
+@app.delete("/api/analytics")
+def clear_analytics(tenant_id: int | None = None, days: int = 0,
+                    user=Depends(require("super_admin"))):
+    ensure_analytics_table()
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(0, int(days))) if days else None
+    with connection() as con:
+        params = []
+        clauses = []
+        if tenant_id:
+            clauses.append("tenant_id=?"); params.append(tenant_id)
+        if cutoff:
+            clauses.append("created_at>=?"); params.append(cutoff.isoformat())
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cur = con.execute("DELETE FROM analytics_events" + where, tuple(params))
+        # Las visitas globales no pertenecen a un negocio; solo se borran al limpiar todo.
+        platform_deleted = 0
+        if not tenant_id and not cutoff:
+            platform_deleted = con.execute("DELETE FROM platform_analytics_events").rowcount
+    return {"status": "cleared", "deleted": int(cur.rowcount or 0), "platform_deleted": int(platform_deleted)}
+
 def time_view(con,i):
     r=con.execute("""SELECT s.*,ts.name service_name,ts.duration_minutes,b.name branch_name,c.name customer_name,c.phone customer_phone,u.name worker_name FROM time_sessions s JOIN time_services ts ON ts.id=s.service_id JOIN branches b ON b.id=s.branch_id JOIN customers c ON c.id=s.customer_id JOIN users u ON u.id=s.worker_id WHERE s.id=?""",(i,)).fetchone()
     if not r:return None
@@ -4762,7 +4867,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.178",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.186",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
