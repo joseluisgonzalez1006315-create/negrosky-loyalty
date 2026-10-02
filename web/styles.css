@@ -376,3 +376,8 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.dashboard{width:100%;max-
 .collaboration-overlay .collaboration-ad{position:relative}.collaboration-overlay .collaboration-close{position:absolute;top:10px;right:10px;z-index:10}
 
 .platform-ad-overlay .platform-ad,.collaboration-overlay .collaboration-ad{box-sizing:border-box}.collaboration-overlay .collaboration-close{top:8px!important;right:8px!important;display:grid;place-items:center;line-height:1;transform:none}.collaboration-overlay .collaboration-ad img{width:auto;max-width:100%;height:auto;max-height:52vh;object-fit:contain;background:transparent;margin:8px auto 14px}
+
+/* Build 166: X siempre visible dentro de la publicidad, incluso al desplazarse */
+.platform-ad-overlay .platform-ad{overflow:auto;padding:18px 24px 22px;}
+.platform-ad-overlay .platform-ad>.collaboration-close{position:sticky!important;top:4px;align-self:flex-end;display:grid;place-items:center;flex:none;width:42px;height:42px;margin:-8px -8px -42px auto;z-index:30;border:1px solid #ffffff55;background:#201b35f5;box-shadow:0 4px 14px #0009;font-size:27px;line-height:1;}
+@media(max-width:560px){.platform-ad-overlay .platform-ad{padding:14px 18px 20px}.platform-ad-overlay .platform-ad>.collaboration-close{top:3px;margin:-5px -4px -42px auto;width:40px;height:40px}}
