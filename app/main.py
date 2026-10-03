@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.186")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.187")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1267,7 +1267,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.186", "build": "186", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.187", "build": "187", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4508,7 +4508,7 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
         tenant = con.execute("SELECT id,name,slug FROM tenants WHERE id=?", (scope,)).fetchone()
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        rows = con.execute("""SELECT event_type,visitor_key,ad_source,ad_id,ad_title,created_at
+        rows = con.execute("""SELECT id,event_type,visitor_key,ad_source,ad_id,ad_title,page_path,created_at
             FROM analytics_events WHERE tenant_id=? AND created_at>=?
             ORDER BY created_at DESC""", (scope, cutoff)).fetchall()
         platform_rows = con.execute("""SELECT id,title,target_tenants_json,starts_at,ends_at,is_active
@@ -4550,11 +4550,12 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
         ads.setdefault((item["source"], item["id"]), {"id": item["id"], "source": item["source"], "title": item["title"], "impressions": 0, "unique_viewers": set(), "closes": 0})
     daily_out = [{**v, "unique_visitors": len(v["unique_visitors"])} for v in sorted(daily.values(), key=lambda x: x["date"], reverse=True)]
     ads_out = [{**v, "unique_viewers": len(v["unique_viewers"])} for v in ads.values()]
+    events_out = [{"id": int(x["id"]), "event_type": x["event_type"], "ad_source": x["ad_source"], "ad_id": x["ad_id"], "ad_title": x["ad_title"], "page_path": x["page_path"], "created_at": row_dict(x).get("created_at")} for x in rows[:200]]
     return {"tenant": row_dict(tenant), "days": days, "visits": sum(1 for x in rows if x["event_type"] == "page_view"),
             "unique_visitors": len(visitors), "ad_impressions": sum(1 for x in rows if x["event_type"] == "ad_impression"),
             "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"), "active_ads": active_ads,
             "has_active_ads": bool(active_ads), "landing_visits": len(landing_rows),
-            "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}), "daily": daily_out, "ads": ads_out}
+            "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}), "daily": daily_out, "ads": ads_out, "events": events_out}
 
 @app.post("/api/notifications/read-all")
 def read_all_notifications(tenant_id: int | None = None,
@@ -4595,6 +4596,22 @@ def clear_analytics(tenant_id: int | None = None, days: int = 0,
         if not tenant_id and not cutoff:
             platform_deleted = con.execute("DELETE FROM platform_analytics_events").rowcount
     return {"status": "cleared", "deleted": int(cur.rowcount or 0), "platform_deleted": int(platform_deleted)}
+
+
+@app.put("/api/analytics/events/{event_id}")
+def edit_analytics_event(event_id: int, data: dict,
+                         user=Depends(require("super_admin"))):
+    event_type = str(data.get("event_type") or "").strip()
+    if event_type not in {"page_view", "ad_impression", "ad_close"}:
+        raise HTTPException(status_code=422, detail="Tipo de evento no permitido")
+    with connection() as con:
+        row = con.execute("SELECT * FROM analytics_events WHERE id=?", (event_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Registro estadístico no encontrado")
+        con.execute("""UPDATE analytics_events SET event_type=?,ad_source=?,ad_id=?,ad_title=?,page_path=?
+            WHERE id=?""", (event_type, (data.get("ad_source") or None), data.get("ad_id"),
+            (str(data.get("ad_title") or "")[:180] or None), (str(data.get("page_path") or "/")[:300]), event_id))
+    return {"status": "updated", "id": event_id}
 
 def time_view(con,i):
     r=con.execute("""SELECT s.*,ts.name service_name,ts.duration_minutes,b.name branch_name,c.name customer_name,c.phone customer_phone,u.name worker_name FROM time_sessions s JOIN time_services ts ON ts.id=s.service_id JOIN branches b ON b.id=s.branch_id JOIN customers c ON c.id=s.customer_id JOIN users u ON u.id=s.worker_id WHERE s.id=?""",(i,)).fetchone()
@@ -4867,7 +4884,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.186",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.187",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
