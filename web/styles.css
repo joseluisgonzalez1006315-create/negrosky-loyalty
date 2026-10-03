@@ -401,3 +401,10 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.dashboard{width:100%;max-
 .theme-gallery-toggle{width:100%;margin:8px 0;text-align:left}.theme-gallery-toggle::after{content:'  (vista previa al pasar el mouse)';color:#a99eb9;font-size:10px;font-weight:400}.theme-gallery.hidden{display:none!important}
 /* BUILD 193 · controles de respaldo visibles */
 .backup-install{display:grid;gap:9px;margin:16px 0;padding:15px;border:1px solid #3b3159;border-radius:15px;background:#11101c}.backup-install b{color:#f4edff}.backup-install small{color:#bdb2d0;line-height:1.45}.backup-install input[type=file]{width:100%;padding:9px;border:1px dashed #6d55cc;border-radius:10px;background:#0d0a17;color:#dcd4eb}.backup-install button{width:100%}
+/* BUILD 195 · encabezado compacto del cliente */
+body.brand-customer .public-brand-hero{display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:11px;align-items:center;min-height:0!important;padding:11px 14px!important;margin-bottom:10px!important}
+body.brand-customer .public-brand-hero .brand-mark{grid-row:1/4;width:42px!important;height:42px!important;margin:0!important;border-radius:13px!important}
+body.brand-customer .public-brand-hero .eyebrow{grid-column:2;margin:0 0 1px!important;font-size:9px!important;line-height:1.1;letter-spacing:.15em}
+body.brand-customer .public-brand-hero h1{grid-column:2;margin:0!important;font-size:1.18rem!important;line-height:1.12!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!important;font-size:.72rem!important;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(min-width:900px){body.brand-customer .public-brand-hero{padding:13px 18px!important}body.brand-customer .public-brand-hero .brand-mark{width:48px!important;height:48px!important}body.brand-customer .public-brand-hero h1{font-size:1.35rem!important}}
