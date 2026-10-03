@@ -54,7 +54,7 @@ class TenantUpdate(TenantInput):
 
 
 class BrandingInput(BaseModel):
-    theme_key: Literal["custom", "food", "coffee", "beauty", "pets", "health", "fitness", "retail", "pool", "premium"] = "custom"
+    theme_key: Literal["custom", "food", "coffee", "beauty", "pets", "health", "fitness", "retail", "pool", "premium", "neon", "nature", "tech", "kids", "minimal", "sunset"] = "custom"
     display_name: str | None = Field(default=None, max_length=120)
     welcome_text: str = Field(default="Bienvenido a nuestro club de beneficios", min_length=3, max_length=180)
     primary_color: str = Field(default="#a970ff", pattern=r"^#[0-9A-Fa-f]{6}$")
