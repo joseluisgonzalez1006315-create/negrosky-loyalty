@@ -408,3 +408,6 @@ body.brand-customer .public-brand-hero .eyebrow{grid-column:2;margin:0 0 1px!imp
 body.brand-customer .public-brand-hero h1{grid-column:2;margin:0!important;font-size:1.18rem!important;line-height:1.12!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!important;font-size:.72rem!important;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(min-width:900px){body.brand-customer .public-brand-hero{padding:13px 18px!important}body.brand-customer .public-brand-hero .brand-mark{width:48px!important;height:48px!important}body.brand-customer .public-brand-hero h1{font-size:1.35rem!important}}
+
+/* Ocultar módulos opcionales vacíos en la vista del cliente */
+#customer-home>#customer-raffles.hidden{display:none!important}

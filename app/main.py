@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.210")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.211")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1312,7 +1312,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.210", "build": "210", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.211", "build": "211", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1905,7 +1905,7 @@ def _save_branding_fields(con, tenant_id: int, fields: dict):
     if existing:
         assignments = ",".join(f"{key}=?" for key in clean)
         if assignments:
-            suffix = ",updated_at=CURRENT_TIMESTAMP" if "updated_at" in available else ""
+            suffix = ",updated_at=CAST(CURRENT_TIMESTAMP AS TEXT)" if "updated_at" in available else ""
             con.execute(
                 f"UPDATE business_branding SET {assignments}{suffix} WHERE tenant_id=?",
                 (*clean.values(), tenant_id),
@@ -1916,7 +1916,7 @@ def _save_branding_fields(con, tenant_id: int, fields: dict):
         if "updated_at" in available:
             columns.append("updated_at")
             values.append(None)
-            placeholders = ",".join("?" for _ in values[:-1]) + ",CURRENT_TIMESTAMP"
+            placeholders = ",".join("?" for _ in values[:-1]) + ",CAST(CURRENT_TIMESTAMP AS TEXT)"
         else:
             placeholders = ",".join("?" for _ in values)
         con.execute(
@@ -4998,7 +4998,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.210",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.211",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
