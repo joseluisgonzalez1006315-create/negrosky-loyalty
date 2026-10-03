@@ -44,8 +44,9 @@ from .security import create_customer_token, create_token, decode_token, hash_pa
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
+ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.190")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.191")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -338,6 +339,10 @@ def run_daily_maintenance():
     """Mantenimiento seguro: respaldo automático y limpieza de avisos antiguos."""
     try:
         cleanup_old_notifications()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ANALYTICS_RETENTION_DAYS)).isoformat()
+        with connection() as con:
+            con.execute("DELETE FROM analytics_events WHERE created_at < ?", (cutoff,))
+            con.execute("DELETE FROM platform_analytics_events WHERE created_at < ?", (cutoff,))
         create_automatic_backup()
     except Exception as exc:
         # El mantenimiento nunca debe impedir que el servidor arranque.
@@ -635,6 +640,21 @@ def ensure_analytics_table():
                 session_key TEXT, page_path TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_platform_analytics_date ON platform_analytics_events(created_at)")
+        if using_postgres():
+            con.execute("""CREATE TABLE IF NOT EXISTS analytics_overrides (
+                tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                period_days INTEGER NOT NULL,
+                visits BIGINT, unique_visitors BIGINT, landing_visits BIGINT,
+                ad_impressions BIGINT, ad_closes BIGINT, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, period_days)
+            )""")
+        else:
+            con.execute("""CREATE TABLE IF NOT EXISTS analytics_overrides (
+                tenant_id INTEGER NOT NULL, period_days INTEGER NOT NULL,
+                visits INTEGER, unique_visitors INTEGER, landing_visits INTEGER,
+                ad_impressions INTEGER, ad_closes INTEGER, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tenant_id, period_days)
+            )""")
 
 
 @app.on_event("startup")
@@ -1292,7 +1312,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.190", "build": "190", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.191", "build": "191", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4557,6 +4577,8 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
             FROM business_ads WHERE tenant_id=? AND is_active=1""", (scope,)).fetchall()
         landing_rows = con.execute("""SELECT visitor_key FROM platform_analytics_events
             WHERE created_at>=?""", (cutoff,)).fetchall()
+        override = con.execute("""SELECT visits,unique_visitors,landing_visits,ad_impressions,ad_closes
+            FROM analytics_overrides WHERE tenant_id=? AND period_days=?""", (scope, days)).fetchone()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     def active_window(row):
         def parse(value):
@@ -4591,11 +4613,14 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
     daily_out = [{**v, "unique_visitors": len(v["unique_visitors"])} for v in sorted(daily.values(), key=lambda x: x["date"], reverse=True)]
     ads_out = [{**v, "unique_viewers": len(v["unique_viewers"])} for v in ads.values()]
     events_out = [{"id": int(x["id"]), "event_type": x["event_type"], "ad_source": x["ad_source"], "ad_id": x["ad_id"], "ad_title": x["ad_title"], "page_path": x["page_path"], "created_at": row_dict(x).get("created_at")} for x in rows[:200]]
-    return {"tenant": row_dict(tenant), "days": days, "visits": sum(1 for x in rows if x["event_type"] == "page_view"),
-            "unique_visitors": len(visitors), "ad_impressions": sum(1 for x in rows if x["event_type"] == "ad_impression"),
-            "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"), "active_ads": active_ads,
-            "has_active_ads": bool(active_ads), "landing_visits": len(landing_rows),
-            "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}), "daily": daily_out, "ads": ads_out, "events": events_out}
+    calculated = {"visits": sum(1 for x in rows if x["event_type"] == "page_view"),
+                  "unique_visitors": len(visitors), "ad_impressions": sum(1 for x in rows if x["event_type"] == "ad_impression"),
+                  "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"),
+                  "landing_visits": len(landing_rows)}
+    metrics = {key: (int(override[key]) if override and override[key] is not None else value) for key, value in calculated.items()}
+    return {"tenant": row_dict(tenant), "days": days, **metrics, "active_ads": active_ads,
+            "has_active_ads": bool(active_ads), "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}),
+            "manual_override": bool(override), "daily": daily_out, "ads": ads_out, "events": events_out}
 
 @app.post("/api/notifications/read-all")
 def read_all_notifications(tenant_id: int | None = None,
@@ -4633,9 +4658,43 @@ def clear_analytics(tenant_id: int | None = None, days: int = 0,
         cur = con.execute("DELETE FROM analytics_events" + where, tuple(params))
         # Las visitas globales no pertenecen a un negocio; solo se borran al limpiar todo.
         platform_deleted = 0
+        if tenant_id:
+            con.execute("DELETE FROM analytics_overrides WHERE tenant_id=?", (tenant_id,))
+        elif not cutoff:
+            con.execute("DELETE FROM analytics_overrides")
         if not tenant_id and not cutoff:
             platform_deleted = con.execute("DELETE FROM platform_analytics_events").rowcount
     return {"status": "cleared", "deleted": int(cur.rowcount or 0), "platform_deleted": int(platform_deleted)}
+
+
+@app.put("/api/analytics/overrides")
+def save_analytics_override(data: dict, user=Depends(require("super_admin"))):
+    tenant_id = int(data.get("tenant_id") or 0)
+    period_days = max(1, min(int(data.get("period_days") or 30), 365))
+    if not tenant_id:
+        raise HTTPException(status_code=422, detail="Selecciona un negocio")
+    metrics = {}
+    for key in ("visits", "unique_visitors", "landing_visits", "ad_impressions", "ad_closes"):
+        value = data.get(key)
+        if value in (None, ""):
+            metrics[key] = None
+        else:
+            try: metrics[key] = max(0, int(value))
+            except (TypeError, ValueError): raise HTTPException(status_code=422, detail=f"Valor inválido para {key}")
+    with connection() as con:
+        if not con.execute("SELECT id FROM tenants WHERE id=?", (tenant_id,)).fetchone():
+            raise HTTPException(status_code=404, detail="Negocio no encontrado")
+        con.execute("""INSERT INTO analytics_overrides(tenant_id,period_days,visits,unique_visitors,landing_visits,ad_impressions,ad_closes,updated_at)
+            VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+            ON CONFLICT(tenant_id,period_days) DO UPDATE SET visits=excluded.visits,unique_visitors=excluded.unique_visitors,landing_visits=excluded.landing_visits,ad_impressions=excluded.ad_impressions,ad_closes=excluded.ad_closes,updated_at=CURRENT_TIMESTAMP""", (tenant_id,period_days,metrics["visits"],metrics["unique_visitors"],metrics["landing_visits"],metrics["ad_impressions"],metrics["ad_closes"]))
+    return {"status":"saved", "tenant_id":tenant_id, "period_days":period_days}
+
+
+@app.delete("/api/analytics/overrides")
+def clear_analytics_override(tenant_id: int, days: int = 30, user=Depends(require("super_admin"))):
+    with connection() as con:
+        con.execute("DELETE FROM analytics_overrides WHERE tenant_id=? AND period_days=?", (tenant_id, max(1,min(int(days or 30),365))))
+    return {"status":"cleared"}
 
 
 @app.put("/api/analytics/events/{event_id}")
@@ -4924,7 +4983,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.190",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.191",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
