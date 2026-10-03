@@ -20,7 +20,7 @@ const CUSTOMER_MODULE_DEFAULTS={loyalty:false,appointments:false,time_sales:fals
 function normalizeCustomerModules(modules){if(Array.isArray(modules)){const allowed=new Set(modules);return Object.fromEntries(Object.keys(CUSTOMER_MODULE_DEFAULTS).map(key=>[key,allowed.has(key)]))}return {...CUSTOMER_MODULE_DEFAULTS,...Object.fromEntries(Object.entries(modules||{}).map(([key,value])=>[key,Boolean(value)]))}}
 function customerModuleEnabled(key){return customerModules[key]===true}
 function setAppointmentVisibility(visible){const allowed=Boolean(visible)&&customerModuleEnabled('appointments');$('appointment-box')?.classList.toggle('hidden',!allowed);$('quick-appointment')?.classList.toggle('hidden',!allowed)}
-function applyCustomerModuleVisibility(modules={}){customerModules=normalizeCustomerModules(modules);const loyaltyOn=customerModuleEnabled('loyalty'),appointmentsOn=customerModuleEnabled('appointments'),rouletteOn=customerModuleEnabled('roulette');$('cards')?.classList.toggle('hidden',!loyaltyOn);if(!loyaltyOn)$('rewards')?.classList.add('hidden');if(!appointmentsOn)setAppointmentVisibility(false);$('customer-roulette')?.classList.toggle('hidden',!rouletteOn);if(!rouletteOn&&$('customer-roulette-list'))$('customer-roulette-list').replaceChildren();document.querySelectorAll('[data-customer-module]').forEach(el=>el.classList.toggle('hidden',!customerModuleEnabled(el.dataset.customerModule)));document.body.dataset.enabledModules=Object.entries(customerModules).filter(([,enabled])=>enabled).map(([key])=>key).join(',')}
+function applyCustomerModuleVisibility(modules={}){customerModules=normalizeCustomerModules(modules);const loyaltyOn=customerModuleEnabled('loyalty'),appointmentsOn=customerModuleEnabled('appointments'),rouletteOn=customerModuleEnabled('roulette');const cards=$('cards'),rewards=$('rewards');cards?.classList.toggle('hidden',!loyaltyOn);rewards?.classList.toggle('hidden',!loyaltyOn);if(!loyaltyOn){cards?.replaceChildren();rewards?.replaceChildren()}if(!appointmentsOn)setAppointmentVisibility(false);$('customer-roulette')?.classList.toggle('hidden',!rouletteOn);if(!rouletteOn&&$('customer-roulette-list'))$('customer-roulette-list').replaceChildren();document.querySelectorAll('[data-customer-module]').forEach(el=>el.classList.toggle('hidden',!customerModuleEnabled(el.dataset.customerModule)));document.body.dataset.enabledModules=Object.entries(customerModules).filter(([,enabled])=>enabled).map(([key])=>key).join(',')}
 function showPublicPageDisabled(){const main=document.querySelector('main.mobile-shell');if(!main)return;let panel=$('public-disabled');if(!panel){panel=document.createElement('section');panel.id='public-disabled';panel.className='hero-card';main.appendChild(panel)}Array.from(main.children).forEach(el=>{if(el===panel)return;if(!el.classList.contains('hidden')){el.dataset.hiddenByPublic='true';el.classList.add('hidden')}});panel.innerHTML='<p class="eyebrow">PÁGINA NO DISPONIBLE</p><h2>Este negocio no está disponible</h2><p class="muted">El Administrador General desactivó la página pública de este negocio.</p>';panel.classList.remove('hidden');publicPageDisabled=true}
 function hidePublicPageDisabled(){if(!publicPageDisabled)return;const main=document.querySelector('main.mobile-shell');main?.querySelectorAll('[data-hidden-by-public]').forEach(el=>{el.classList.remove('hidden');delete el.dataset.hiddenByPublic});$('public-disabled')?.classList.add('hidden');publicPageDisabled=false}
 setAppointmentVisibility(false);
@@ -106,13 +106,18 @@ function applyPublicBranding(b){
   document.body.classList.add(`brand-card-${b.card_style}`);
   document.body.dataset.cardShape=b.card_shape;document.body.dataset.buttonShape=b.button_shape;document.body.dataset.stampShape=b.stamp_shape;document.body.dataset.progressStyle=b.progress_style;document.body.dataset.font=b.font_family;document.body.dataset.logoShape=b.logo_shape;document.body.dataset.logoFit=b.logo_fit;
   document.body.classList.toggle('brand-hide-profile',!b.show_profile);document.body.classList.toggle('brand-hide-rewards',!b.show_rewards);document.body.classList.toggle('brand-hide-appointments',!b.show_appointments);
-  $('business-title').textContent=b.display_name;
-  $('business-welcome').textContent=b.welcome_text;
+  const businessName=String(b.display_name||b.name||slug.replaceAll('-',' ')||'Tu negocio').trim();
+  $('business-title').textContent=businessName;
+  $('business-welcome').textContent=b.welcome_text||'Bienvenido a nuestro club de beneficios';
+  const profile=$('customer-profile');
+  if(token&&b.show_profile!==false)profile?.classList.remove('hidden');
+  const hello=$('hello');
+  if(token&&hello&&(!hello.textContent||hello.textContent==='¡Hola!'))hello.textContent='¡Hola!';
   const logo=$('business-logo');
-  if(b.logo_url){const img=document.createElement('img');img.loading='eager';img.decoding='async';img.src=`${b.logo_url}?v=${encodeURIComponent(b.updated_at||Date.now())}`;img.alt=`Logo de ${b.display_name}`;logo.textContent='';logo.appendChild(img)}
+  if(b.logo_url){const img=document.createElement('img');img.loading='eager';img.decoding='async';img.src=`${b.logo_url}?v=${encodeURIComponent(b.updated_at||Date.now())}`;img.alt=`Logo de ${businessName}`;logo.textContent='';logo.appendChild(img)}
   else {logo.textContent=(b.display_name||'N').trim().charAt(0).toUpperCase()||'N'}
   renderPublicBusinessInfo(b);applyCustomerModuleOrder(b);
-  document.title=`${b.display_name} · Mi tarjeta`;
+  document.title=`${businessName} · Mi tarjeta`;
   document.documentElement.classList.remove('customer-loading');
 }
 function showCustomerLoadingShell(){
@@ -121,6 +126,8 @@ function showCustomerLoadingShell(){
   if(!home)return;
   $('identify-box')?.classList.add('hidden');
   home.classList.remove('hidden');
+  const profile=$('customer-profile');
+  if(profile)profile.classList.remove('hidden');
   const hello=$('hello');
   if(hello&&!hello.textContent)hello.textContent='¡Hola!';
   const cards=$('cards');
@@ -157,10 +164,13 @@ function renderCachedBootstrap(d){
   localStorage.setItem('negrosky_global_customer',JSON.stringify({name:d.customer?.name,phone:d.customer?.phone}));
   $('identify-box').classList.add('hidden');$('customer-home').classList.remove('hidden');
   $('hello').textContent=`¡Hola, ${d.customer?.name||''}!`;
-  $('cards').innerHTML=d.cards?.length?d.cards.map(loyaltyCardMarkup).join(''):'<div class="hero-card"><p>Aún no hay tarjetas activas.</p></div>';
+  const loyaltyOn=customerModuleEnabled('loyalty');
+  $('cards').innerHTML=loyaltyOn?(d.cards?.length?d.cards.map(loyaltyCardMarkup).join(''):'') : '';
   const groups=rewardGroups(d.rewards||[]);
-  $('rewards').innerHTML=groups.map(g=>`<div class="loyalty-card"><p class="eyebrow">PREMIOS DISPONIBLES · ${g.program_name}</p><h2>${g.name}</h2><p>Tienes <b>${g.count}</b> premio${g.count===1?'':'s'} para reclamar.</p><label>¿Cuántos deseas reclamar?<select id="reward-qty-${g.program_id}">${Array.from({length:g.count},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label><button class="full" onclick="rewardBatch(${g.program_id},+document.getElementById('reward-qty-${g.program_id}').value)">Reclamar premio${g.count===1?'':'s'}</button></div>`).join('');
+  $('rewards').innerHTML=loyaltyOn?groups.map(g=>`<div class="loyalty-card"><p class="eyebrow">PREMIOS DISPONIBLES · ${g.program_name}</p><h2>${g.name}</h2><p>Tienes <b>${g.count}</b> premio${g.count===1?'':'s'} para reclamar.</p><label>¿Cuántos deseas reclamar?<select id="reward-qty-${g.program_id}">${Array.from({length:g.count},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label><button class="full" onclick="rewardBatch(${g.program_id},+document.getElementById('reward-qty-${g.program_id}').value)">Reclamar premio${g.count===1?'':'s'}</button></div>`).join('') : '';
   setupCustomerInstall();setupCustomerPush();syncAutomaticModules({hasRewards:groups.length});
+  const customerName=d.customer?.name||'';
+  if(customerName&&$('hello')){$('hello').textContent=`¡Hola, ${customerName}!`;$('customer-profile')?.classList.remove('hidden');}
 }
 async function showHome(){
   try{
