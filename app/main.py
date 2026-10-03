@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.208")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.209")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1312,7 +1312,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.208", "build": "208", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.209", "build": "209", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1973,13 +1973,21 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
             "module_order_mobile": data.module_order_mobile, "module_order_desktop": data.module_order_desktop,
             "module_widths_mobile": data.module_widths_mobile, "module_widths_desktop": data.module_widths_desktop,
         })
-        # El registro de auditoría no puede bloquear el guardado del diseño.
-        # Algunas bases restauradas tienen una estructura antigua de audit_logs.
+        # La auditoría usa un SAVEPOINT: si la tabla audit_logs antigua
+        # rechaza el registro, PostgreSQL queda limpio y el diseño se conserva.
+        audit_savepoint = "branding_audit_savepoint"
         try:
+            con.execute(f"SAVEPOINT {audit_savepoint}")
             audit(con, user, "update", "business_branding", scope,
                   {"background_style": data.background_style, "card_style": data.card_style})
+            con.execute(f"RELEASE SAVEPOINT {audit_savepoint}")
         except Exception as audit_error:
-            print(f"[branding] auditoría omitida: {audit_error}", flush=True)
+            try:
+                con.execute(f"ROLLBACK TO SAVEPOINT {audit_savepoint}")
+                con.execute(f"RELEASE SAVEPOINT {audit_savepoint}")
+            except Exception as recovery_error:
+                print(f"[branding] recuperación de auditoría omitida: {recovery_error}", flush=True)
+            print(f"[branding] auditoría omitida; diseño conservado: {audit_error}", flush=True)
         return branding_payload(con, scope)
 
 
@@ -5003,7 +5011,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.208",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.209",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
