@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.207")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.208")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1312,7 +1312,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.207", "build": "207", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.208", "build": "208", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1881,29 +1881,47 @@ def branding_payload(con, tenant_id: int):
 
 
 def _save_branding_fields(con, tenant_id: int, fields: dict):
-    """Save branding without relying on a Supabase UNIQUE constraint.
+    """Save branding against both old and current PostgreSQL schemas.
 
-    Older databases may have the right table but lack the unique index that
-    PostgreSQL requires for ``ON CONFLICT(tenant_id)``.  An explicit lookup is
-    compatible with both the old and current schemas and is safe here because
-    one request writes one tenant at a time.
+    A restored Supabase database can be missing newer optional branding
+    columns. Filter the payload to columns that really exist so one missing
+    optional field cannot abort the entire transaction.
     """
+    if using_postgres():
+        rows = con.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='business_branding'
+        """).fetchall()
+        available = {row[0] for row in rows}
+    else:
+        available = {row[1] for row in con.execute("PRAGMA table_info(business_branding)")}
+    if "tenant_id" not in available:
+        raise HTTPException(status_code=500, detail="La tabla business_branding no tiene tenant_id")
     existing = con.execute(
         "SELECT 1 FROM business_branding WHERE tenant_id=? LIMIT 1", (tenant_id,)
     ).fetchone()
-    clean = {key: value for key, value in fields.items() if key != "tenant_id"}
+    clean = {key: value for key, value in fields.items()
+             if key != "tenant_id" and key in available}
     if existing:
         assignments = ",".join(f"{key}=?" for key in clean)
-        con.execute(
-            f"UPDATE business_branding SET {assignments},updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?",
-            (*clean.values(), tenant_id),
-        )
+        if assignments:
+            suffix = ",updated_at=CURRENT_TIMESTAMP" if "updated_at" in available else ""
+            con.execute(
+                f"UPDATE business_branding SET {assignments}{suffix} WHERE tenant_id=?",
+                (*clean.values(), tenant_id),
+            )
     else:
-        columns = ",".join(("tenant_id", *clean.keys(), "updated_at"))
-        placeholders = ",".join("?" for _ in range(len(clean) + 1))
+        columns = list(clean.keys())
+        values = list(clean.values())
+        if "updated_at" in available:
+            columns.append("updated_at")
+            values.append(None)
+            placeholders = ",".join("?" for _ in values[:-1]) + ",CURRENT_TIMESTAMP"
+        else:
+            placeholders = ",".join("?" for _ in values)
         con.execute(
-            f"INSERT INTO business_branding ({columns}) VALUES ({placeholders},CURRENT_TIMESTAMP)",
-            (tenant_id, *clean.values()),
+            f"INSERT INTO business_branding (tenant_id,{','.join(columns)}) VALUES (?,{placeholders})",
+            (tenant_id, *values[:-1]) if "updated_at" in available else (tenant_id, *values),
         )
 
 
@@ -1955,7 +1973,6 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
             "module_order_mobile": data.module_order_mobile, "module_order_desktop": data.module_order_desktop,
             "module_widths_mobile": data.module_widths_mobile, "module_widths_desktop": data.module_widths_desktop,
         })
-        con.execute("UPDATE business_branding SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?", (scope,))
         # El registro de auditoría no puede bloquear el guardado del diseño.
         # Algunas bases restauradas tienen una estructura antigua de audit_logs.
         try:
@@ -2005,7 +2022,6 @@ def delete_branding_logo(tenant_id: int | None = None,
     with connection() as con:
         require_user_module(con, user, "public_page")
         con.execute("UPDATE business_branding SET logo_mime=NULL,logo_blob=NULL,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?", (scope,))
-        con.execute("UPDATE business_branding SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?", (scope,))
         audit(con, user, "delete_logo", "business_branding", scope)
     return {"status": "deleted"}
 
@@ -2073,7 +2089,7 @@ def delete_branding_background(tenant_id: int | None = None,
     with connection() as con:
         require_user_module(con, user, "public_page")
         con.execute("""UPDATE business_branding SET background_mime=NULL,background_blob=NULL,
-            updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?""", (scope,))
+            updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?""", (scope,))
         audit(con, user, "delete_background", "business_branding", scope)
     return {"status": "deleted"}
 
@@ -4987,7 +5003,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.207",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.208",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
