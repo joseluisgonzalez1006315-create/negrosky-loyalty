@@ -54,7 +54,7 @@ class TenantUpdate(TenantInput):
 
 
 class BrandingInput(BaseModel):
-    theme_key: Literal["custom", "food", "coffee", "beauty", "pets", "health", "fitness", "retail", "pool", "premium"] = "custom"
+    theme_key: Literal["custom", "food", "coffee", "beauty", "pets", "health", "fitness", "retail", "pool", "premium", "neon", "nature", "tech", "kids", "minimal", "sunset"] = "custom"
     display_name: str | None = Field(default=None, max_length=120)
     welcome_text: str = Field(default="Bienvenido a nuestro club de beneficios", min_length=3, max_length=180)
     primary_color: str = Field(default="#a970ff", pattern=r"^#[0-9A-Fa-f]{6}$")
@@ -190,6 +190,8 @@ class WorkerAccessInput(BaseModel):
 class PlatformAdInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str | None = Field(default=None, max_length=500)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     image_url: str = Field(min_length=20, max_length=8_000_000)
     target_tenants: list[int] = Field(default_factory=list, max_length=500)
     starts_at: str | None = None
@@ -201,6 +203,8 @@ class BusinessAdInput(BaseModel):
     tenant_id: int | None = None
     title: str = Field(min_length=2, max_length=120)
     message: str | None = Field(default=None, max_length=500)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     image_url: str = Field(min_length=20, max_length=8_000_000)
     starts_at: str | None = None
     ends_at: str | None = None
@@ -248,6 +252,13 @@ class ResetPlatformInput(BaseModel):
     confirmation: str
 
 
+class CustomerProfileInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    phone: str = Field(pattern=r"^[0-9]{10}$")
+    birth_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    birthday_consent: bool = False
+
+
 class CustomerIdentifyInput(BaseModel):
     # El celular identifica al cliente; el nombre puede omitirse.
     name: str | None = Field(default=None, max_length=120)
@@ -289,6 +300,8 @@ class CollaborationCreateInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str = Field(default="", max_length=500)
     image_url: str | None = Field(default=None, max_length=2_500_000)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     ends_at: str | None = Field(default=None, max_length=40)
     ad_seconds: int = Field(default=5, ge=1, le=60)
 
@@ -296,6 +309,8 @@ class CollaborationUpdateInput(BaseModel):
     title: str = Field(min_length=2, max_length=120)
     message: str = Field(default="", max_length=500)
     image_url: str | None = Field(default=None, max_length=2_500_000)
+    target_url: str | None = Field(default=None, max_length=2000)
+    target_label: str | None = Field(default=None, max_length=60)
     ends_at: str | None = Field(default=None, max_length=40)
     ad_seconds: int = Field(default=5, ge=1, le=60)
 
@@ -421,3 +436,13 @@ class TimeSessionStartInput(BaseModel):
     service_id: int
     customer_id: int
 class TimeSessionCloseInput(BaseModel): notes: str | None = Field(default=None, max_length=500)
+
+
+class AnalyticsEventInput(BaseModel):
+    event_type: Literal["page_view", "ad_impression", "ad_close"]
+    visitor_key: str = Field(min_length=8, max_length=160)
+    session_key: str | None = Field(default=None, max_length=160)
+    ad_source: str | None = Field(default=None, max_length=30)
+    ad_id: int | None = Field(default=None, ge=1)
+    ad_title: str | None = Field(default=None, max_length=180)
+    page_path: str | None = Field(default=None, max_length=300)

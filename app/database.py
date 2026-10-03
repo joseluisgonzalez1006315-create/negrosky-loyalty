@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 import re
 
+_POSTGRES_POOL = None
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / "data" / "negrosky_v2.db"
 
@@ -28,6 +30,32 @@ def postgres_url() -> str | None:
 
 def using_postgres() -> bool:
     return bool(postgres_url())
+
+
+def _postgres_row_factory(cursor):
+    def make_row(values):
+        columns = [item.name for item in cursor.description]
+        return _CompatRow(columns, values)
+    return make_row
+
+
+def _postgres_pool():
+    """Reuse a small pool instead of opening a Supabase connection per request."""
+    global _POSTGRES_POOL
+    if _POSTGRES_POOL is None:
+        try:
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:
+            raise RuntimeError("Falta instalar psycopg[binary,pool] para usar PostgreSQL") from exc
+        _POSTGRES_POOL = ConnectionPool(
+            conninfo=postgres_url(),
+            min_size=1,
+            max_size=8,
+            kwargs={"row_factory": _postgres_row_factory},
+            timeout=20,
+            open=True,
+        )
+    return _POSTGRES_POOL
 
 
 class _CompatRow(dict):
@@ -132,27 +160,16 @@ class _PostgresConnection:
 @contextmanager
 def connection():
     if using_postgres():
-        try:
-            import psycopg
-        except ImportError as exc:
-            raise RuntimeError("Falta instalar psycopg[binary] para usar PostgreSQL") from exc
-
-        def row_factory(cursor):
-            def make_row(values):
-                columns = [item.name for item in cursor.description]
-                return _CompatRow(columns, values)
-            return make_row
-
-        con = psycopg.connect(postgres_url(), row_factory=row_factory)
-        wrapped = _PostgresConnection(con)
-        try:
-            yield wrapped
-            wrapped.commit()
-        except Exception:
-            wrapped.rollback()
-            raise
-        finally:
-            wrapped.close()
+        pool = _postgres_pool()
+        # pool.connection() returns the connection to the pool on exit.
+        with pool.connection() as con:
+            wrapped = _PostgresConnection(con)
+            try:
+                yield wrapped
+                wrapped.commit()
+            except Exception:
+                wrapped.rollback()
+                raise
         return
 
     path = database_path()
@@ -280,6 +297,12 @@ def init_db() -> None:
                 UNIQUE (tenant_id, branch_id, weekday),
                 FOREIGN KEY (tenant_id) REFERENCES tenants(id),
                 FOREIGN KEY (branch_id) REFERENCES branches(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE TABLE IF NOT EXISTS feature_modules (
@@ -704,6 +727,23 @@ def init_db() -> None:
             updated_at TEXT,
             FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            visitor_key TEXT NOT NULL,
+            session_key TEXT,
+            ad_source TEXT,
+            ad_id INTEGER,
+            ad_title TEXT,
+            page_path TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_analytics_tenant_date
+            ON analytics_events(tenant_id, created_at)""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_analytics_ad
+            ON analytics_events(tenant_id, ad_source, ad_id, created_at)""")
         con.execute("""CREATE TABLE IF NOT EXISTS tenant_onboarding (
             tenant_id INTEGER PRIMARY KEY,
             completed INTEGER NOT NULL DEFAULT 0,
@@ -806,6 +846,9 @@ def init_db() -> None:
                 con.execute(f"ALTER TABLE collaborations ADD COLUMN {name} {definition}")
         customer_columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
         raffle_columns = {row[1] for row in con.execute("PRAGMA table_info(raffles)")}
+        if "winner_photo_url" not in raffle_columns:
+            con.execute("ALTER TABLE raffles ADD COLUMN winner_photo_url TEXT")
+
         raffle_operation_columns = {row[1] for row in con.execute("PRAGMA table_info(raffle_operation_tokens)")}
         if "validated_by_name" not in raffle_operation_columns:
             con.execute("ALTER TABLE raffle_operation_tokens ADD COLUMN validated_by_name TEXT")
@@ -854,7 +897,7 @@ def init_db() -> None:
         con.execute("UPDATE users SET username=lower(substr(email,1,instr(email,'@')-1)) WHERE username IS NULL AND instr(email,'@')>1 AND NOT EXISTS (SELECT 1 FROM users other WHERE other.id!=users.id AND lower(other.username)=lower(substr(users.email,1,instr(users.email,'@')-1)))")
         customer_columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
         for name, definition in {
-            "notes": "TEXT", "tags": "TEXT", "created_by_user_id": "INTEGER", "merged_into_id": "INTEGER", "search_key": "TEXT"
+            "notes": "TEXT", "tags": "TEXT", "created_by_user_id": "INTEGER", "merged_into_id": "INTEGER", "search_key": "TEXT", "deleted_at": "TEXT"
         }.items():
             if name not in customer_columns:
                 con.execute(f"ALTER TABLE customers ADD COLUMN {name} {definition}")
