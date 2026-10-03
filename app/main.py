@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.197")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.198")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1312,7 +1312,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.197", "build": "196", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.198", "build": "198", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -4618,7 +4618,8 @@ def get_analytics(days: int = 30, tenant_id: int | None = None,
                   "ad_closes": sum(1 for x in rows if x["event_type"] == "ad_close"),
                   "landing_visits": len(landing_rows)}
     metrics = {key: (int(override[key]) if override and override[key] is not None else value) for key, value in calculated.items()}
-    return {"tenant": row_dict(tenant), "days": days, **metrics, "active_ads": active_ads,
+    override_values = {key: (int(override[key]) if override and override[key] is not None else None) for key in calculated}
+    return {"tenant": row_dict(tenant), "days": days, **metrics, "calculated": calculated, "override_values": override_values, "active_ads": active_ads,
             "has_active_ads": bool(active_ads), "landing_unique_visitors": len({x["visitor_key"] for x in landing_rows}),
             "manual_override": bool(override), "daily": daily_out, "ads": ads_out, "events": events_out}
 
@@ -4687,7 +4688,7 @@ def save_analytics_override(data: dict, user=Depends(require("super_admin"))):
         con.execute("""INSERT INTO analytics_overrides(tenant_id,period_days,visits,unique_visitors,landing_visits,ad_impressions,ad_closes,updated_at)
             VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
             ON CONFLICT(tenant_id,period_days) DO UPDATE SET visits=excluded.visits,unique_visitors=excluded.unique_visitors,landing_visits=excluded.landing_visits,ad_impressions=excluded.ad_impressions,ad_closes=excluded.ad_closes,updated_at=CURRENT_TIMESTAMP""", (tenant_id,period_days,metrics["visits"],metrics["unique_visitors"],metrics["landing_visits"],metrics["ad_impressions"],metrics["ad_closes"]))
-    return {"status":"saved", "tenant_id":tenant_id, "period_days":period_days}
+    return {"status":"saved", "tenant_id":tenant_id, "period_days":period_days, "metrics": metrics}
 
 
 @app.delete("/api/analytics/overrides")
@@ -4983,7 +4984,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.197",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.198",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
