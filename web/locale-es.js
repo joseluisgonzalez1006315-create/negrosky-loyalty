@@ -14,30 +14,16 @@
     if (!Number.isInteger(hour) || !Number.isInteger(minute)) return time;
     return `${hour % 12 || 12}:${two(minute)} ${hour < 12 ? 'a. m.' : 'p. m.'}`;
   }
-  function parseDate(value) {
-    if (value === null || value === undefined || value === '') return null;
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-    const raw = String(value).trim();
-    if (!raw) return null;
-    let normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
-    // PostgreSQL puede devolver offsets como +00, +0000 o +00:00.
-    normalized = normalized.replace(/([+-]\d{2})$/, '$1:00').replace(/([+-]\d{2})(\d{2})$/, '$1:$2');
-    const candidates = [normalized];
-    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(normalized)) candidates.push(normalized + 'Z');
-    candidates.push(normalized.replace(/\.\d{1,6}/, ''));
-    for (const candidate of candidates) {
-      const date = new Date(candidate);
-      if (!Number.isNaN(date.getTime())) return date;
-    }
-    return null;
-  }
   function dateTime(value, timeZone) {
-    const date = parseDate(value);
-    if (!date) return String(value || 'Fecha no disponible');
-    return new Intl.DateTimeFormat('es-CO', {
-      timeZone: timeZone || 'America/Bogota', dateStyle: 'medium',
-      timeStyle: 'short', hour12: true,
-    }).format(date);
+    try {
+      return new Intl.DateTimeFormat('es-CO', {
+        timeZone: timeZone || 'America/Bogota', dateStyle: 'medium',
+        timeStyle: 'short', hour12: true,
+      }).format(new Date(value));
+    } catch {
+      return new Intl.DateTimeFormat('es-CO', {timeZone: 'America/Bogota',
+        dateStyle: 'medium',timeStyle: 'short',hour12: true}).format(new Date(value));
+    }
   }
   function dayKey(value, timeZone) {
     let fields;
@@ -70,6 +56,6 @@
       <small>Escribe 0 para quitar la demora. Las citas posteriores no cambian de hora automáticamente.</small>
       <button type="submit">Actualizar demora</button></form></details>`;
   }
-  window.NegroskyES = { appointmentStates, states, clock, parseDate, dateTime, dayKey,
+  window.NegroskyES = { appointmentStates, states, clock, dateTime, dayKey,
     appointmentTime, escape, delayForm };
 })();

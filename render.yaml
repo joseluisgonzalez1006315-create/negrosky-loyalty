@@ -5,7 +5,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     plan: free
-    healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         sync: false
@@ -13,5 +12,3 @@ services:
         sync: false
       - key: NEGROSKY_ADMIN_PASSWORD
         sync: false
-      - key: PUBLIC_BASE_URL
-        value: https://negrosky-loyalty.onrender.com

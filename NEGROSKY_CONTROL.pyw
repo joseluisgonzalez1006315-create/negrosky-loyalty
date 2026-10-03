@@ -12,85 +12,25 @@ import tempfile
 import zipfile
 import shutil
 import threading
-import base64
-import ctypes
-from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import messagebox, ttk, simpledialog
+from tkinter import messagebox, ttk
 
-TOOL_ROOT = Path(__file__).resolve().parent
-
-def find_project_root():
-    candidates = [
-        Path(r"C:\Negrosky\Loyalty\negrosky-loyalty-main"),
-        TOOL_ROOT,
-        Path.home() / "Downloads" / "negrosky-loyalty-main",
-    ]
-    for candidate in candidates:
-        if (candidate / "app" / "main.py").exists() and (candidate / ".venv" / "Scripts" / "python.exe").exists():
-            return candidate
-    for base in [Path(r"C:\Negrosky\Loyalty"), TOOL_ROOT, Path.home() / "Downloads"]:
-        if not base.exists():
-            continue
-        try:
-            for marker in base.rglob("app/main.py"):
-                candidate = marker.parent.parent
-                if (candidate / ".venv" / "Scripts" / "python.exe").exists():
-                    return candidate
-        except OSError:
-            pass
-    return TOOL_ROOT
-
-ROOT = find_project_root()
+ROOT = Path(__file__).resolve().parent
 PID_FILE = ROOT / ".negrosky-server.pid"
 DB_FILE = ROOT / "data" / "negrosky_v2.db"
 BACKUPS = ROOT / "backups"
 ERROR_LOG = ROOT / "servidor_error.log"
 OUTPUT_LOG = ROOT / "servidor_salida.log"
-PASSWORD_FILE = ROOT / ".negrosky_pg_password"
 PORT = 8030
 CURRENT_VERSION = "3.0.56"
 CURRENT_BUILD = "056"
 GITHUB_ARCHIVE = "https://github.com/joseluisgonzalez1006315-create/negrosky-loyalty/archive/refs/heads/main.zip"
 
 
-def protect_password(value):
-    if os.name != "nt": return None
-    class Blob(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-    raw = value.encode("utf-8")
-    buf = ctypes.create_string_buffer(raw)
-    inp = Blob(len(raw), ctypes.cast(buf, ctypes.POINTER(ctypes.c_byte)))
-    out = Blob()
-    if not ctypes.windll.crypt32.CryptProtectData(ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out)):
-        return None
-    data = ctypes.string_at(out.pbData, out.cbData)
-    ctypes.windll.kernel32.LocalFree(out.pbData)
-    return base64.b64encode(data).decode("ascii")
-
-
-def unprotect_password():
-    try:
-        encoded = PASSWORD_FILE.read_text(encoding="ascii").strip()
-        data = base64.b64decode(encoded)
-        class Blob(ctypes.Structure):
-            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-        buf = ctypes.create_string_buffer(data)
-        inp = Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_byte)))
-        out = Blob()
-        if not ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(inp), None, None, None, None, 0, ctypes.byref(out)):
-            return None
-        value = ctypes.string_at(out.pbData, out.cbData).decode("utf-8")
-        ctypes.windll.kernel32.LocalFree(out.pbData)
-        return value
-    except Exception:
-        return None
-
-
 def python_path():
-    candidate = ROOT / ".venv" / "Scripts" / "python.exe"
+    candidate = ROOT / "venv" / "Scripts" / "python.exe"
     return candidate if candidate.exists() else Path(sys.executable)
 
 
@@ -202,11 +142,6 @@ class Control(tk.Tk):
         self._style()
         self._build()
         self.refresh()
-        self.after(1200, self.auto_start_saved)
-
-    def auto_start_saved(self):
-        if unprotect_password() and not is_online():
-            self.start_server(auto=True)
 
     def _style(self):
         style = ttk.Style(self)
@@ -311,7 +246,7 @@ class Control(tk.Tk):
         self.log.insert("1.0", content or "Sin errores registrados.")
         self.after(5000, self.refresh)
 
-    def start_server(self, auto=False):
+    def start_server(self):
         health = server_health()
         if health:
             if is_current_server():
@@ -329,26 +264,12 @@ class Control(tk.Tk):
         if not python.exists():
             messagebox.showerror("NEGROSKY", "Primero ejecuta INSTALAR_WINDOWS.bat una sola vez.")
             return
-        password = unprotect_password()
-        if not password:
-            password = simpledialog.askstring("PostgreSQL local", "Contraseña local de PostgreSQL:", show="*")
-            if password is None:
-                return
-            if messagebox.askyesno("Guardar contraseña", "¿Guardar la contraseña cifrada en este usuario de Windows para iniciar automáticamente?"):
-                encrypted = protect_password(password)
-                if encrypted:
-                    PASSWORD_FILE.write_text(encrypted, encoding="ascii")
-                    messagebox.showinfo("Negrosky", "Contraseña guardada de forma cifrada. El servidor iniciará automáticamente.")
         out = open(OUTPUT_LOG, "a", encoding="utf-8")
         err = open(ERROR_LOG, "a", encoding="utf-8")
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        env = os.environ.copy()
-        env["PGPASSWORD"] = password
-        env["DATABASE_URL"] = "postgresql://postgres@localhost:5432/negrosky_loyalty"
-        env.pop("SUPABASE_DB_URL", None)
-        process = subprocess.Popen([str(python), "-m", "uvicorn", "app.main:app",
+        process = subprocess.Popen([str(python), "-m", "uvicorn", "core.backend.api.main:app",
                                     "--host", "0.0.0.0", "--port", str(PORT)],
-                                   cwd=ROOT, stdout=out, stderr=err, env=env, creationflags=flags)
+                                   cwd=ROOT, stdout=out, stderr=err, creationflags=flags)
         PID_FILE.write_text(str(process.pid), encoding="ascii")
         for _ in range(20):
             self.update()

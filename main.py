@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.185")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.55")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
@@ -1007,7 +1007,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.185", "build": "185", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.55", "build": "055", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.get("/api/system/urls")
@@ -2668,24 +2668,6 @@ def identify_customer(slug: str, data: CustomerIdentifyInput):
     safe = row_dict(customer)
     return {"customer": safe, "access_token": create_customer_token(safe), "token_type": "bearer"}
 
-def ensure_public_branch(con, tenant_id: int):
-    """Provide one active principal branch for general businesses.
-
-    Reservations require a branch internally, even when the business has only
-    one general location. Reuse an existing Principal branch when present;
-    otherwise create a clearly named default branch.
-    """
-    active = con.execute("SELECT id FROM branches WHERE tenant_id=? AND status='active' ORDER BY id LIMIT 1", (tenant_id,)).fetchone()
-    if active:
-        return active["id"]
-    principal = con.execute("SELECT id FROM branches WHERE tenant_id=? AND LOWER(name)=LOWER(?) ORDER BY id LIMIT 1", (tenant_id, "Principal")).fetchone()
-    if principal:
-        con.execute("UPDATE branches SET status='active' WHERE id=?", (principal["id"],))
-        return principal["id"]
-    cur = con.execute("INSERT INTO branches (tenant_id,name,status,schedule_mode) VALUES (?,?,?,?)", (tenant_id, "Principal", "active", "inherit"))
-    return cur.lastrowid
-
-
 @app.get("/api/public/{slug}/branches")
 def public_branches(slug: str):
     with connection() as con:
@@ -2693,7 +2675,6 @@ def public_branches(slug: str):
         if not tenant:
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         require_public_module(con, tenant["id"], "public_page")
-        ensure_public_branch(con, tenant["id"])
         rows = con.execute("SELECT id, name, city, address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
     return [row_dict(row) for row in rows]
 
@@ -2948,7 +2929,7 @@ def public_operation_status(code: str, customer=Depends(current_customer)):
 
 
 @app.get("/api/operations/preview/{code}")
-def preview_operation(code: str, user=Depends(require("business_admin", "worker", "branch_admin"))):
+def preview_operation(code: str, user=Depends(require("worker", "branch_admin"))):
     if len(code) != 6 or not code.isdigit():
         raise HTTPException(status_code=422, detail="El código debe tener seis números")
     now = datetime.now(timezone.utc)
@@ -2991,8 +2972,9 @@ def preview_operation(code: str, user=Depends(require("business_admin", "worker"
 
 
 @app.post("/api/operations/validate-purchase")
-def validate_purchase(data: ValidateOperationInput, user=Depends(require("business_admin", "worker", "branch_admin"))):
-    branch_id = user.get("branch_id")
+def validate_purchase(data: ValidateOperationInput, user=Depends(require("worker", "branch_admin"))):
+    if not user["branch_id"]:
+        raise HTTPException(status_code=422, detail="El usuario debe tener una sucursal")
     now = datetime.now(timezone.utc)
     with connection() as con:
         con.execute("BEGIN IMMEDIATE")
@@ -3223,47 +3205,21 @@ def public_appointment_services(slug: str, branch_id: int):
     return [row_dict(row) for row in rows]
 
 
-
-@app.get("/api/public/{slug}/appointment-bootstrap")
-def appointment_bootstrap(slug: str):
-    """Load branches and active appointment services in one request."""
-    with connection() as con:
-        tenant = con.execute("SELECT * FROM tenants WHERE slug=? AND status='active'", (slug,)).fetchone()
-        if not tenant:
-            raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        require_public_module(con, tenant["id"], "public_page")
-        ensure_public_branch(con, tenant["id"])
-        branches = con.execute("SELECT id,name,city,address FROM branches WHERE tenant_id=? AND status='active' ORDER BY name", (tenant["id"],)).fetchall()
-        if not module_enabled(con, tenant["id"], "appointments") and not any(module_enabled(con, tenant["id"], "appointments", branch["id"]) for branch in branches):
-            raise HTTPException(status_code=404, detail="Agenda de citas no disponible")
-        services = con.execute("""SELECT id,name,duration_minutes,price,branch_id FROM appointment_services
-            WHERE tenant_id=? AND status='active' ORDER BY name""", (tenant["id"],)).fetchall()
-        branding = con.execute("SELECT display_name,whatsapp_number FROM business_branding WHERE tenant_id=?", (tenant["id"],)).fetchone()
-    return {"branches":[row_dict(row) for row in branches],"services":[row_dict(row) for row in services],
-            "whatsapp": branding["whatsapp_number"] if branding else None,
-            "business_name": (branding["display_name"] if branding and branding["display_name"] else tenant["name"])}
-
 def appointment_slots_for_day(con, tenant_id, branch_id, service, zone, target_day,
-                              stop_at_first=False, hours_rows=None, busy_rows=None):
-    # For a single day we load the schedule and occupied appointments normally.
-    # The month calendar passes preloaded values so it does not repeat these queries
-    # once per day on Render.
-    if hours_rows is None:
-        branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
-                             (branch_id, tenant_id)).fetchone()
-        hours_branch = branch_id if branch["schedule_mode"] == "custom" else None
-        hours_rows = con.execute("""SELECT weekday,enabled,opens_at,closes_at FROM business_hours
-            WHERE tenant_id=? AND branch_id IS ?""", (tenant_id, hours_branch)).fetchall()
-    hours = hours_rows
-    if busy_rows is None:
-        day_begin = datetime(target_day.year, target_day.month, target_day.day, tzinfo=zone).astimezone(timezone.utc)
-        day_end = day_begin + timedelta(days=2)
-        busy_rows = con.execute("""SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
-            FROM appointments WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
-            AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?""",
-            (tenant_id, branch_id, day_end.isoformat(), day_begin.isoformat())).fetchall()
+                              stop_at_first=False):
+    branch = con.execute("SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
+                         (branch_id, tenant_id)).fetchone()
+    hours_branch = branch_id if branch["schedule_mode"] == "custom" else None
+    hours = con.execute("""SELECT weekday,enabled,opens_at,closes_at FROM business_hours
+        WHERE tenant_id=? AND branch_id IS ?""", (tenant_id, hours_branch)).fetchall()
+    day_begin = datetime(target_day.year, target_day.month, target_day.day, tzinfo=zone).astimezone(timezone.utc)
+    day_end = day_begin + timedelta(days=2)
+    occupied = con.execute("""SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
+        FROM appointments WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
+        AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?""",
+        (tenant_id, branch_id, day_end.isoformat(), day_begin.isoformat())).fetchall()
     busy = [(datetime.fromisoformat(row["starts_at"]), datetime.fromisoformat(row["occupied_end"]))
-            for row in busy_rows]
+            for row in occupied]
     now = datetime.now(timezone.utc) + timedelta(minutes=10)
     result = []
     for hour in range(24):
@@ -3353,33 +3309,12 @@ def appointment_month_calendar(slug: str, branch_id: int, service_id: int, month
         if first > today + timedelta(days=180) or first.month < 1:
             raise HTTPException(status_code=422, detail="Mes fuera del período de reservas")
         following = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
-        # Preload the branch schedule and all occupied appointments once.
-        # Previously this endpoint executed one or two database queries per day
-        # (up to 31 round trips), which made the calendar feel slow on Render.
-        branch_settings = con.execute(
-            "SELECT schedule_mode FROM branches WHERE id=? AND tenant_id=?",
-            (branch_id, tenant["id"]),
-        ).fetchone()
-        hours_branch = branch_id if branch_settings["schedule_mode"] == "custom" else None
-        hours_rows = con.execute(
-            "SELECT weekday,enabled,opens_at,closes_at FROM business_hours WHERE tenant_id=? AND branch_id IS ?",
-            (tenant["id"], hours_branch),
-        ).fetchall()
-        range_start = datetime(first.year, first.month, first.day, tzinfo=zone).astimezone(timezone.utc)
-        range_end = datetime(following.year, following.month, following.day, tzinfo=zone).astimezone(timezone.utc)
-        occupied_rows = con.execute("""
-            SELECT starts_at,COALESCE(estimated_end_at,ends_at) occupied_end
-            FROM appointments
-            WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
-              AND starts_at<? AND COALESCE(estimated_end_at,ends_at)>?
-        """, (tenant["id"], branch_id, range_end.isoformat(), range_start.isoformat())).fetchall()
         days = {}
         day = first
         while day < following:
             if today <= day <= today + timedelta(days=180):
                 count = sum(slot["available"] for slot in appointment_slots_for_day(
-                    con, tenant["id"], branch_id, service, zone, day,
-                    hours_rows=hours_rows, busy_rows=occupied_rows))
+                    con, tenant["id"], branch_id, service, zone, day))
                 if count:
                     days[day.isoformat()] = count
             day += timedelta(days=1)
@@ -3453,26 +3388,7 @@ def my_appointments(customer=Depends(current_customer)):
             WHERE a.customer_id=? AND a.tenant_id=?
             ORDER BY a.starts_at DESC LIMIT 100""", (customer["id"], customer["tenant_id"]),
         ).fetchall()
-    # La limpieza es solo visual para el cliente: nunca se borran citas de la base
-    # ni del historial administrativo. Las completadas/no asistió desaparecen
-    # inmediatamente; los demás estados se conservan hasta 24 horas después
-    # de terminar el día local de la cita.
-    visible = []
-    for row in rows:
-        if row["status"] in ("completed", "no_show"):
-            continue
-        try:
-            zone = ZoneInfo(row["tenant_timezone"])
-        except ZoneInfoNotFoundError:
-            zone = timezone(timedelta(hours=-5))
-        starts_local = datetime.fromisoformat(row["starts_at"]).astimezone(zone)
-        hide_after = datetime.combine(
-            starts_local.date() + timedelta(days=2), datetime.min.time(), tzinfo=zone
-        )
-        if datetime.now(zone) >= hide_after:
-            continue
-        visible.append(row_dict(row))
-    return visible
+    return [row_dict(row) for row in rows]
 
 
 @app.post("/api/public/me/appointments/{appointment_id}/cancel")
@@ -3514,9 +3430,9 @@ def list_appointments(tenant_id: int | None = None, branch_id: int | None = None
     with connection() as con:
         require_user_module(con, user, "appointments", branch_id)
         query = """SELECT a.*,c.name customer_name,c.phone customer_phone,s.name service_name,s.duration_minutes,
-        b.name branch_name,t.timezone tenant_timezone,bb.whatsapp_number business_whatsapp FROM appointments a JOIN customers c ON c.id=a.customer_id
+        b.name branch_name,t.timezone tenant_timezone FROM appointments a JOIN customers c ON c.id=a.customer_id
         JOIN appointment_services s ON s.id=a.service_id JOIN branches b ON b.id=a.branch_id
-        JOIN tenants t ON t.id=a.tenant_id LEFT JOIN business_branding bb ON bb.tenant_id=a.tenant_id
+        JOIN tenants t ON t.id=a.tenant_id
         WHERE a.tenant_id=?"""
         params = [scope]
         if branch_id is not None:
