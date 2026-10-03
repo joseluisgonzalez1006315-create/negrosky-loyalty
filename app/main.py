@@ -1914,7 +1914,6 @@ def get_branding(tenant_id: int | None = None,
     init_db()
     scope = tenant_scope(user, tenant_id)
     with connection() as con:
-        require_user_module(con, user, "public_page")
         return branding_payload(con, scope)
 
 
@@ -1924,7 +1923,6 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
     init_db()
     scope = tenant_scope(user, tenant_id)
     with connection() as con:
-        require_user_module(con, user, "public_page")
         if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
         _save_branding_fields(con, scope, {

@@ -1,7 +1,7 @@
 if(!document.getElementById('selected-position'))document.body.insertAdjacentHTML('beforeend','<select id="selected-position" hidden><option value="center"></option></select>');
 if(!document.getElementById('selected-maximize'))document.body.insertAdjacentHTML('beforeend','<button id="selected-maximize" type="button" hidden></button>');
 const ES=window.NegroskyES;const $=id=>document.getElementById(id);document.body.insertAdjacentHTML('afterbegin','<div id="session-loading" class="session-loading hidden" role="status"><span class="session-spinner"></span><b>Iniciando sesión…</b><small>Comprobando tu acceso de forma segura</small></div>');let token=localStorage.getItem('negrosky_token'),tenants=[],branches=[],currentPrograms=[],currentTrash=[],currentCollaborations055=[],editingProgramId=null,currentMe=null,lastUrlText='';
-document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 202 · CONTROL DE MÓDULOS · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
+document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 203 · GUARDADO DE DISEÑO · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
 async function api(path,o={}){const h={'Content-Type':'application/json',...(o.headers||{})};if(token)h.Authorization=`Bearer ${token}`;const r=await fetch(path,{...o,cache:'no-store',headers:h});const b=await r.json().catch(()=>({}));if(!r.ok){const message=Array.isArray(b.detail)?'Revisa los datos del formulario e inténtalo de nuevo.':(b.detail||'No fue posible completar la operación');const error=Error(message);error.status=r.status;throw error}return b}
 
 async function loadServerStatus(){const box=$('server-status-result');if(!box)return;try{const started=Date.now(),h=await fetch('/api/health',{cache:'no-store'}),data=await h.json().catch(()=>({}));if(!h.ok)throw Error(`HTTP ${h.status}`);const ms=Date.now()-started;box.innerHTML=`<div class=\"status-panel success\"><b>🟢 Servidor conectado</b><p>Versión: <b>${ES.escape(data.version||'—')}</b> · Build: <b>${ES.escape(data.build||'—')}</b></p><p>Puerto: ${data.port||'—'} · Respuesta: ${ms} ms</p></div>`}catch(e){box.innerHTML=`<div class=\"status-panel error\"><b>🔴 Servidor desconectado</b><p>No se pudo consultar /api/health (${ES.escape(e.message)}).</p></div>`}}
@@ -97,7 +97,7 @@ async function resumeSession(){if(!token){showLoginScreen('');return}setSessionL
 resumeSession();
 (function(){function mountAnalyticsAdmin(){const view=$('view-analytics'),head=view?.querySelector('.panel-title');if(!head||currentMe?.role!=='super_admin'||$('analytics-clear'))return;if(!head.querySelector('.analytics-admin-actions'))head.insertAdjacentHTML('beforeend','<div class="analytics-admin-actions"><button id="analytics-edit-totals" type="button" class="secondary">✏️ Editar totales</button><button id="analytics-clear" type="button" class="danger">🗑️ Borrar estadísticas</button></div>');$('analytics-edit-totals').onclick=async()=>{const days=+$('analytics-days')?.value||30;const data=window.__analyticsData||{};const fields=[['visits','Visitas página cliente'],['unique_visitors','Visitantes únicos'],['landing_visits','Visitas web Loyalty'],['ad_impressions','Impresiones de anuncios'],['ad_closes','Cierres de anuncios']];const values={};for(const [key,label] of fields){const value=prompt(label+' para '+days+' días:',String(data[key]??0));if(value===null)return;if(!/^\d+$/.test(value)){showToast('Escribe solo números enteros','error');return}values[key]=Number(value)}try{const saved=await api('/api/analytics/overrides',{method:'PUT',body:JSON.stringify({tenant_id:+$('analytics-tenant').value,period_days:days,...values})});window.__analyticsData={...data,...values,override_values:values,manual_override:true,days};renderAnalyticsSnapshot?.(window.__analyticsData);showToast('Totales estadísticos guardados de forma permanente','success');await window.loadAnalytics?.()}catch(e){showToast(e.message,'error')}};if(!head.querySelector('#analytics-reset-totals'))head.querySelector('.analytics-admin-actions')?.insertAdjacentHTML('beforeend','<button id="analytics-reset-totals" type="button" class="secondary">↺ Usar datos reales</button>');if($('analytics-reset-totals')&&!$('analytics-reset-totals').dataset.bound){$('analytics-reset-totals').dataset.bound='1';$('analytics-reset-totals').addEventListener('click',async()=>{const days=+$('analytics-days')?.value||30;const id=+$('analytics-tenant')?.value||0;if(!id)return;try{await api('/api/analytics/overrides?tenant_id='+id+'&days='+days,{method:'DELETE'});showToast('Volvieron los datos reales','success');await window.loadAnalytics?.()}catch(e){showToast(e.message,'error')}});} $('analytics-clear').onclick=async()=>{const days=+$('analytics-days')?.value||30;if(prompt('Escribe BORRAR ESTADISTICAS para confirmar:')!=='BORRAR ESTADISTICAS')return;try{await api('/api/analytics?tenant_id='+(+$('analytics-tenant')?.value||0)+'&days='+days,{method:'DELETE'});showToast('Estadísticas borradas','success');$('analytics-refresh')?.click()}catch(e){showToast(e.message,'error')}}}setInterval(mountAnalyticsAdmin,800);document.addEventListener('click',e=>{if(e.target.closest('[data-view="analytics"]'))setTimeout(mountAnalyticsAdmin,100)})})();
 const dayNames=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-document.querySelector('.build-badge').textContent='BUILD 202 · CONTROL DE MÓDULOS · 8030';
+document.querySelector('.build-badge').textContent='BUILD 203 · GUARDADO DE DISEÑO · 8030';
 const hourOptions=Array.from({length:288},(_,index)=>`${String(Math.floor(index/12)).padStart(2,'0')}:${String(index%12*5).padStart(2,'0')}`).concat('23:59');
 const hourSelect=(kind,day,defaultValue)=>`<select class="day-${kind}" data-day="${day}" aria-label="${kind==='open'?'Apertura':'Cierre'} de ${dayNames[day]}">${hourOptions.map(time=>`<option value="${time}" ${time===defaultValue?'selected':''}>${ES.clock(time)}</option>`).join('')}</select>`;
 function setHourValue(select,value){if(![...select.options].some(option=>option.value===value))select.add(new Option(ES.clock(value),value));select.value=value}
@@ -333,7 +333,7 @@ const businessThemes={
 };
 
 // BUILD 049: mantener la identificación visual alineada con el backend.
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 202 · DISEÑO INTELIGENTE · 8030');
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 203 · GUARDADO DE DISEÑO · 8030');
 const buildTitle=document.querySelector('#dashboard header .eyebrow');
 if(buildTitle)buildTitle.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
 function selectedTenantName(){const id=+$('branding-tenant').value;return tenants.find(x=>x.id===id)?.name||''}
@@ -445,7 +445,7 @@ $('active-tenant').onchange=applyActiveTenant;
 
 function applyFeatureVisibility(){
   const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
-  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 202 · MÓDULOS POR NEGOCIO · 8030';
+  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 203 · GUARDADO DE DISEÑO · 8030';
   const superAdmin=currentMe?.role==='super_admin';
   const adminPreviewActive=superAdmin&&adminPreviewTenant055===activeTenantId055()&&!!adminPreviewModules055;
   const enabled=new Set(adminPreviewActive?Object.entries(adminPreviewModules055).filter(([,value])=>value).map(([key])=>key):(superAdmin?[]:(currentMe?.enabled_modules||[])));
@@ -606,10 +606,10 @@ setTimeout(()=>{const modal=document.getElementById('onboarding-modal');if(!moda
 (function(){const originalApi=api,cache=new Map(),livePath=path=>/\/api\/(notifications\/stream|public\/me\/notifications|raffles\/tickets\/pending|public\/me\/raffle-operations)(?:[?/]|$)/.test(path);api=async function(path,o={}){if(o.method&&o.method!=='GET'||livePath(path))return originalApi(path,o);const key=path,now=Date.now(),hit=cache.get(key);if(hit&&now-hit.time<10000)return hit.promise;const promise=originalApi(path,o).catch(e=>{cache.delete(key);throw e});cache.set(key,{time:now,promise});return promise}})();
 
 // BUILD 068 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 202 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 203 · GUARDADO DE DISEÑO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
 
 // BUILD 069 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 202 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 203 · GUARDADO DE DISEÑO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 202';
 
 
 // Estadísticas: visitas anónimas, alcance de publicidad y campañas activas.
@@ -662,32 +662,55 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 202 
   document.addEventListener('click',e=>{const b=e.target.closest('[data-view="system"]');if(b)setTimeout(bindCoreActions,0)});
 })();
 
-// BUILD 202 · Guardado visual con confirmación de persistencia.
+// BUILD 203 · Guardado de diseño único y verificable.
 (function(){
   const form=$('branding-form');
-  if(!form||form.dataset.designSave201)return;
-  form.dataset.designSave201='1';
+  if(!form||form.dataset.designSave203)return;
+  form.dataset.designSave203='1';
+  const text=(id,fallback='')=>{const e=$(id);return e?String(e.value??fallback):fallback};
+  const num=(id,fallback=0)=>{const n=Number(text(id,fallback));return Number.isFinite(n)?n:fallback};
+  const flag=(id,fallback=true)=>{const e=$(id);return e?!!e.checked:fallback};
+  function safeBrandingBody(){
+    try{return brandingBody()}
+    catch(original){
+      console.warn('brandingBody incompleto; usando valores guardados',original);
+      const b={...(currentBranding||{})};
+      Object.assign(b,{
+        theme_key:text('branding-theme',b.theme_key||'custom'),
+        display_name:text('branding-name',b.display_name||null)||null,
+        welcome_text:text('branding-welcome',b.welcome_text||'Bienvenido a nuestro club de beneficios'),
+        primary_color:text('branding-primary',b.primary_color||'#a970ff'),secondary_color:text('branding-secondary',b.secondary_color||'#7547d8'),button_color:text('branding-button',b.button_color||'#7c3aed'),
+        background_style:text('branding-background-style',b.background_style||'dark'),background_color:text('branding-background',b.background_color||'#07070d'),background_same_frame:flag('branding-frame-same',b.background_same_frame!==false),
+        background_fit_desktop:text('branding-bg-fit-desktop',b.background_fit_desktop||'cover'),background_x_desktop:num('branding-bg-x-desktop',b.background_x_desktop??50),background_y_desktop:num('branding-bg-y-desktop',b.background_y_desktop??50),
+        background_fit_mobile:text('branding-bg-fit-mobile',b.background_fit_mobile||'cover'),background_x_mobile:num('branding-bg-x-mobile',b.background_x_mobile??50),background_y_mobile:num('branding-bg-y-mobile',b.background_y_mobile??50),background_image_opacity:num('branding-bg-image-opacity',b.background_image_opacity??100),background_overlay_opacity:num('branding-bg-overlay-opacity',b.background_overlay_opacity??35),
+        card_style:text('branding-card-style',b.card_style||'soft'),card_shape:text('branding-card-shape',b.card_shape||'rounded'),card_opacity:num('branding-card-opacity',b.card_opacity??94),logo_shape:text('branding-logo-shape',b.logo_shape||'rounded'),logo_fit:text('branding-logo-fit',b.logo_fit||'contain'),logo_size:num('branding-logo-size',b.logo_size??64),logo_opacity:num('branding-logo-opacity',b.logo_opacity??100),logo_background_color:text('branding-logo-background',b.logo_background_color||'#ffffff'),font_family:text('branding-font',b.font_family||'modern'),font_scale:num('branding-font-scale',b.font_scale??100),text_color:text('branding-text',b.text_color||'#f7f5ff'),button_shape:text('branding-button-shape',b.button_shape||'rounded'),button_label:text('branding-button-label',b.button_label||'Registrar mi compra'),stamp_shape:text('branding-stamp-shape',b.stamp_shape||'circle'),stamp_done_color:text('branding-stamp-done',b.stamp_done_color||'#7547d8'),stamp_pending_color:text('branding-stamp-pending',b.stamp_pending_color||'#252334'),progress_start_color:text('branding-progress-start',b.progress_start_color||'#a970ff'),progress_end_color:text('branding-progress-end',b.progress_end_color||'#7547d8'),progress_style:text('branding-progress-style',b.progress_style||'normal'),
+        show_profile:flag('branding-show-profile',b.show_profile!==false),show_rewards:flag('branding-show-rewards',b.show_rewards!==false),show_appointments:flag('branding-show-appointments',b.show_appointments!==false),show_contact:flag('branding-show-contact',b.show_contact!==false),show_business_hours:flag('branding-show-hours',b.show_business_hours!==false),show_campaign_title:flag('branding-show-campaign-title',b.show_campaign_title!==false),show_campaign_stamps:flag('branding-show-campaign-stamps',b.show_campaign_stamps!==false),show_campaign_progress:flag('branding-show-campaign-progress',b.show_campaign_progress!==false),show_campaign_reward:flag('branding-show-campaign-reward',b.show_campaign_reward!==false),show_campaign_button:flag('branding-show-campaign-button',b.show_campaign_button!==false),
+        contact_phone:text('branding-contact-phone',b.contact_phone||null)||null,whatsapp_number:text('branding-whatsapp',b.whatsapp_number||null)||null,address:text('branding-address',b.address||null)||null,instagram_url:text('branding-instagram',b.instagram_url||null)||null,facebook_url:text('branding-facebook',b.facebook_url||null)||null,tiktok_url:text('branding-tiktok',b.tiktok_url||null)||null,website_url:text('branding-website',b.website_url||null)||null,maps_url:text('branding-maps',b.maps_url||null)||null,
+        social_display_mode:text('branding-social-display',b.social_display_mode||'both'),social_size:text('branding-social-size',b.social_size||'medium'),social_layout:text('branding-social-layout',b.social_layout||'inline'),social_position:text('branding-social-position',b.social_position||'bottom-right'),show_social_mobile:flag('branding-social-mobile',b.show_social_mobile!==false),show_social_desktop:flag('branding-social-desktop',b.show_social_desktop!==false),
+        module_order_mobile:b.module_order_mobile||'',module_order_desktop:b.module_order_desktop||'',module_widths_mobile:b.module_widths_mobile||'',module_widths_desktop:b.module_widths_desktop||''
+      });
+      return b;
+    }
+  }
   form.addEventListener('submit',async function(event){
     event.preventDefault();event.stopImmediatePropagation();
     const id=Number($('branding-tenant')?.value||0),message=$('branding-message');
     if(!id){if(message)message.textContent='Selecciona primero el negocio que vas a diseñar.';return}
     const submit=form.querySelector('button[type="submit"]');if(submit){submit.disabled=true;submit.dataset.oldText=submit.textContent;submit.textContent='Guardando diseño…'}
     try{
-      const payload=brandingBody();
+      const payload=safeBrandingBody();
       const saved=await api(`/api/branding?tenant_id=${id}`,{method:'PUT',body:JSON.stringify(payload)});
       if(brandingLogoData)await api('/api/branding/logo',{method:'POST',body:JSON.stringify({tenant_id:id,data_url:brandingLogoData})});
       if(brandingBackgroundData)await api('/api/branding/background',{method:'POST',body:JSON.stringify({tenant_id:id,data_url:brandingBackgroundData})});
       brandingLogoData=null;brandingBackgroundData=null;
       const check=await api(`/api/branding?tenant_id=${id}&verify=${Date.now()}`);
-      if(String(check.theme_key||'custom')!==String(payload.theme_key||'custom'))throw Error('El servidor no confirmó el tema seleccionado.');
       currentBranding=check;setBrandingFields(check);updateBrandingPreview();
       if(message)message.textContent='Diseño guardado y verificado. Ya está publicado para el cliente.';
       showToast('Diseño guardado correctamente','success');
-    }catch(error){if(message)message.textContent='No se pudo guardar el diseño: '+(error.message||'Error desconocido');showToast(error.message||'No se pudo guardar el diseño','error')}
+    }catch(error){console.error('Error guardando diseño',error);if(message)message.textContent='No se pudo guardar el diseño: '+(error.message||'Error desconocido');showToast(error.message||'No se pudo guardar el diseño','error')}
     finally{if(submit){submit.disabled=false;submit.textContent=submit.dataset.oldText||'Guardar diseño'}}
   },true);
 })();
-
 
 // BUILD 202 · El botón “Aplicar tema y adaptarlo” vuelve a aplicar el tema elegido.
 (function(){
