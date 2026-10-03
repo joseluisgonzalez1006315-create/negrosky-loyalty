@@ -1956,8 +1956,13 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
             "module_widths_mobile": data.module_widths_mobile, "module_widths_desktop": data.module_widths_desktop,
         })
         con.execute("UPDATE business_branding SET updated_at=strftime('%Y-%m-%d %H:%M:%f','now') WHERE tenant_id=?", (scope,))
-        audit(con, user, "update", "business_branding", scope,
-              {"background_style": data.background_style, "card_style": data.card_style})
+        # El registro de auditoría no puede bloquear el guardado del diseño.
+        # Algunas bases restauradas tienen una estructura antigua de audit_logs.
+        try:
+            audit(con, user, "update", "business_branding", scope,
+                  {"background_style": data.background_style, "card_style": data.card_style})
+        except Exception as audit_error:
+            print(f"[branding] auditoría omitida: {audit_error}", flush=True)
         return branding_payload(con, scope)
 
 
