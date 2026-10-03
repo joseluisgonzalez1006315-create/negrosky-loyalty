@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.187")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.188")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -107,6 +107,21 @@ def ensure_runtime_indexes():
                 con.execute(statement)
     except Exception:
         # A partially migrated project must still start; existing indexes remain valid.
+        pass
+
+
+def ensure_customer_trash_column():
+    """Versiona la columna de papelera también en PostgreSQL cloud."""
+    try:
+        with connection() as con:
+            if using_postgres():
+                con.execute("ALTER TABLE customers ADD COLUMN IF NOT EXISTS deleted_at TEXT")
+            else:
+                columns = {row[1] for row in con.execute("PRAGMA table_info(customers)")}
+                if "deleted_at" not in columns:
+                    con.execute("ALTER TABLE customers ADD COLUMN deleted_at TEXT")
+    except Exception:
+        # La aplicación puede iniciar; el error concreto aparecerá al usar la papelera.
         pass
 
 
@@ -617,6 +632,7 @@ def ensure_analytics_table():
 def startup():
     global _maintenance_task
     init_db()
+    ensure_customer_trash_column()
     ensure_platform_settings_table()
     ensure_raffle_winner_photo_column()
     sync_module_defaults()
@@ -1267,7 +1283,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.187", "build": "187", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.188", "build": "188", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -2586,8 +2602,8 @@ def permanently_delete_customer(customer_id: int,
         customer = con.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
         if not customer:
             raise HTTPException(status_code=404, detail="Cliente no encontrado")
-        if customer["status"] != "trashed":
-            raise HTTPException(status_code=409, detail="Primero envía el cliente a la papelera")
+        if customer["status"] not in ("active", "trashed"):
+            raise HTTPException(status_code=409, detail="El cliente ya fue eliminado")
         tenant_scope(user, customer["tenant_id"])
         cid, phone = customer["id"], customer["phone"]
         # Se eliminan primero las tablas dependientes para respetar las claves foráneas.
@@ -4884,7 +4900,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.187",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.188",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
