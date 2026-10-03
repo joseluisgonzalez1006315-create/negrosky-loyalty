@@ -12,6 +12,7 @@ import shutil
 import socket
 import zipfile
 import hashlib
+import time
 from math import ceil
 from datetime import date, datetime, timedelta, timezone
 import ipaddress
@@ -44,9 +45,17 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.188")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.189")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+# Cache corto en memoria para respuestas públicas con imágenes embebidas.
+# Reduce lecturas repetidas a Supabase sin dejar desactualizados los anuncios por mucho tiempo.
+_PUBLIC_AD_CACHE_TTL = 60
+_PUBLIC_AD_CACHE = {}
+
+def _clear_public_ad_cache():
+    _PUBLIC_AD_CACHE.clear()
 
 @app.middleware("http")
 async def no_browser_cache(request, call_next):
@@ -1283,7 +1292,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.188", "build": "188", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.189", "build": "189", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -1592,6 +1601,7 @@ def create_platform_ad(data: PlatformAdInput, user=Depends(require("super_admin"
             (title,message,image_url,target_tenants_json,starts_at,ends_at,ad_seconds,is_active,target_url,target_label,updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None))
         row = con.execute("SELECT * FROM platform_ads WHERE id=?", (cur.lastrowid,)).fetchone()
+    _clear_public_ad_cache()
     return _platform_ad_dict(row)
 
 
@@ -1606,6 +1616,7 @@ def update_platform_ad(ad_id: int, data: PlatformAdInput, user=Depends(require("
             raise HTTPException(status_code=422, detail="Uno de los negocios seleccionados no existe")
         con.execute("""UPDATE platform_ads SET title=?,message=?,image_url=?,target_tenants_json=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,target_label=?,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (data.title.strip(), data.message or "", data.image_url, json.dumps(targets), data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None, ad_id))
         row = con.execute("SELECT * FROM platform_ads WHERE id=?", (ad_id,)).fetchone()
+    _clear_public_ad_cache()
     return _platform_ad_dict(row)
 
 
@@ -1615,6 +1626,7 @@ def update_platform_ad_status(ad_id: int, active: dict, user=Depends(require("su
         cur = con.execute("UPDATE platform_ads SET is_active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (int(bool(active.get("active"))), ad_id))
         if not cur.rowcount:
             raise HTTPException(status_code=404, detail="Publicidad no encontrada")
+    _clear_public_ad_cache()
     return {"status": "active" if active.get("active") else "inactive"}
 
 
@@ -1624,6 +1636,7 @@ def delete_platform_ad(ad_id: int, user=Depends(require("super_admin"))):
         cur = con.execute("DELETE FROM platform_ads WHERE id=?", (ad_id,))
         if not cur.rowcount:
             raise HTTPException(status_code=404, detail="Publicidad no encontrada")
+    _clear_public_ad_cache()
     return {"status": "deleted"}
 
 
@@ -1642,6 +1655,7 @@ def create_business_ad(data: BusinessAdInput, user=Depends(require("super_admin"
     with connection() as con:
         cur = con.execute("INSERT INTO business_ads (tenant_id,title,message,image_url,starts_at,ends_at,ad_seconds,is_active,target_url,target_label,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)", (scope, data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None))
         row = con.execute("SELECT * FROM business_ads WHERE id=?", (cur.lastrowid,)).fetchone()
+    _clear_public_ad_cache()
     return {**row_dict(row), "is_active": bool(row["is_active"])}
 
 
@@ -1657,6 +1671,7 @@ def update_business_ad(ad_id: int, data: BusinessAdInput, user=Depends(require("
             raise HTTPException(status_code=403, detail="No tiene permiso para esta publicidad")
         con.execute("UPDATE business_ads SET title=?,message=?,image_url=?,starts_at=?,ends_at=?,ad_seconds=?,is_active=?,target_url=?,target_label=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (data.title.strip(), data.message or "", data.image_url, data.starts_at, data.ends_at, data.ad_seconds, int(data.is_active), _validate_ad_target_url(data.target_url), (data.target_label or "").strip() or None, ad_id))
         row = con.execute("SELECT * FROM business_ads WHERE id=?", (ad_id,)).fetchone()
+    _clear_public_ad_cache()
     return {**row_dict(row), "is_active": bool(row["is_active"])}
 
 
@@ -1668,6 +1683,7 @@ def update_business_ad_status(ad_id: int, active: dict, user=Depends(require("su
             raise HTTPException(status_code=404, detail="Publicidad no encontrada")
         tenant_scope(user, row["tenant_id"])
         con.execute("UPDATE business_ads SET is_active=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (int(bool(active.get("active"))), ad_id))
+    _clear_public_ad_cache()
     return {"status": "active" if active.get("active") else "inactive"}
 
 
@@ -1679,6 +1695,7 @@ def delete_business_ad(ad_id: int, user=Depends(require("super_admin", "business
             raise HTTPException(status_code=404, detail="Publicidad no encontrada")
         tenant_scope(user, row["tenant_id"])
         con.execute("DELETE FROM business_ads WHERE id=?", (ad_id,))
+    _clear_public_ad_cache()
     return {"status": "deleted"}
 
 
@@ -4449,6 +4466,13 @@ def public_collaborations(slug: str):
 
 @app.get("/api/public/{slug}/platform-ads")
 def public_platform_ads(slug: str):
+    # La respuesta contiene flyers en base64; reutilizarla durante 60 s evita
+    # que cada recarga vuelva a transferir las mismas imágenes desde Supabase.
+    cache_key = str(slug).strip().lower()
+    cached = _PUBLIC_AD_CACHE.get(cache_key)
+    now_mono = time.monotonic()
+    if cached and now_mono - cached[0] < _PUBLIC_AD_CACHE_TTL:
+        return cached[1]
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     with connection() as con:
         tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
@@ -4459,21 +4483,21 @@ def public_platform_ads(slug: str):
             AND (starts_at IS NULL OR starts_at<=?)
             AND (ends_at IS NULL OR ends_at>=?)
             ORDER BY created_at DESC,id DESC""", (now, now)).fetchall()
-    result = []
-    for row in rows:
-        try:
-            targets = json.loads(row["target_tenants_json"] or "[]")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            targets = []
-        if not targets or tenant["id"] in targets:
-            result.append(row_dict(row))
-    with connection() as con:
+        result = []
+        for row in rows:
+            try:
+                targets = json.loads(row["target_tenants_json"] or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                targets = []
+            if not targets or tenant["id"] in targets:
+                result.append(row_dict(row))
         business_rows = con.execute("""SELECT id,title,message,image_url,target_url,target_label,starts_at,ends_at,ad_seconds
             FROM business_ads WHERE tenant_id=? AND is_active=1
             AND (starts_at IS NULL OR starts_at<=?)
             AND (ends_at IS NULL OR ends_at>=?)
             ORDER BY created_at DESC,id DESC""", (tenant["id"], now, now)).fetchall()
-    result.extend([{**row_dict(row), "source": "business"} for row in business_rows])
+        result.extend([{**row_dict(row), "source": "business"} for row in business_rows])
+    _PUBLIC_AD_CACHE[cache_key] = (now_mono, result)
     return result
 
 
@@ -4900,7 +4924,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.188",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.189",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
