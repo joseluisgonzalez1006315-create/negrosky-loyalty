@@ -1,7 +1,7 @@
 if(!document.getElementById('selected-position'))document.body.insertAdjacentHTML('beforeend','<select id="selected-position" hidden><option value="center"></option></select>');
 if(!document.getElementById('selected-maximize'))document.body.insertAdjacentHTML('beforeend','<button id="selected-maximize" type="button" hidden></button>');
 const ES=window.NegroskyES;const $=id=>document.getElementById(id);document.body.insertAdjacentHTML('afterbegin','<div id="session-loading" class="session-loading hidden" role="status"><span class="session-spinner"></span><b>Iniciando sesión…</b><small>Comprobando tu acceso de forma segura</small></div>');let token=localStorage.getItem('negrosky_token'),tenants=[],branches=[],currentPrograms=[],currentTrash=[],currentCollaborations055=[],editingProgramId=null,currentMe=null,lastUrlText='';
-document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 200 · CONTROL DE MÓDULOS · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
+document.body.insertAdjacentHTML('afterbegin','<div class="build-badge">BUILD 201 · CONTROL DE MÓDULOS · 8030</div>');const rewardLabel=$('program-reward').closest('label');rewardLabel.insertAdjacentHTML('afterend','<label>Disponibilidad visible al cliente<select id="program-reward-display"><option value="hidden">No mostrar nada</option><option value="unlimited">Mostrar premios ilimitados</option><option value="quantity">Mostrar cantidad disponible</option></select></label><label id="program-stock-label" class="hidden">Cantidad total de premios<input id="program-stock" type="number" min="1" max="1000000" value="100"></label>');$('program-reward-display').onchange=()=>{$('program-stock-label').classList.toggle('hidden',$('program-reward-display').value!=='quantity');$('program-stock').required=$('program-reward-display').value==='quantity'};const extraEmojis=['🍰','🍩','🌭','🍗','🥗','🧁','🧋','🍺','🍷','🌮','🧃','🌸','🌿','💊','🩺','👟','👗','👓','📚','🎮','🎵','🏋️','⚽','🐶','🐱','🔧','🏠','💻','📱','💈'];document.querySelector('.emoji-picker').insertAdjacentHTML('beforeend',extraEmojis.map(x=>`<button type="button">${x}</button>`).join(''));$('program-list').insertAdjacentHTML('afterend','<section class="trash-panel"><div class="trash-title"><div><p class="eyebrow">PAPELERA</p><h3>🗑️ Campañas eliminadas</h3></div><span class="muted">El progreso permanece guardado</span></div><div id="trash-list" class="tenant-list"></div></section>');
 async function api(path,o={}){const h={'Content-Type':'application/json',...(o.headers||{})};if(token)h.Authorization=`Bearer ${token}`;const r=await fetch(path,{...o,cache:'no-store',headers:h});const b=await r.json().catch(()=>({}));if(!r.ok){const message=Array.isArray(b.detail)?'Revisa los datos del formulario e inténtalo de nuevo.':(b.detail||'No fue posible completar la operación');const error=Error(message);error.status=r.status;throw error}return b}
 
 async function loadServerStatus(){const box=$('server-status-result');if(!box)return;try{const started=Date.now(),h=await fetch('/api/health',{cache:'no-store'}),data=await h.json().catch(()=>({}));if(!h.ok)throw Error(`HTTP ${h.status}`);const ms=Date.now()-started;box.innerHTML=`<div class=\"status-panel success\"><b>🟢 Servidor conectado</b><p>Versión: <b>${ES.escape(data.version||'—')}</b> · Build: <b>${ES.escape(data.build||'—')}</b></p><p>Puerto: ${data.port||'—'} · Respuesta: ${ms} ms</p></div>`}catch(e){box.innerHTML=`<div class=\"status-panel error\"><b>🔴 Servidor desconectado</b><p>No se pudo consultar /api/health (${ES.escape(e.message)}).</p></div>`}}
@@ -18,7 +18,7 @@ async function load(){
   const s=dashboardResult.status==='fulfilled'?dashboardResult.value:{businesses:0,branches:0,users:0,customers:0};
   currentMe=me;tenants=tenantsResult.value;
   $('login').classList.add('hidden');$('dashboard').classList.remove('hidden');
-  const title=document.querySelector('#dashboard header .eyebrow');if(title)title.textContent='NEGROSKY LOYALTY V3 · BUILD 200';
+  const title=document.querySelector('#dashboard header .eyebrow');if(title)title.textContent='NEGROSKY LOYALTY V3 · BUILD 201';
   $('identity').textContent=`${me.name} · ${me.username||me.email||me.role}`;
   const superAdmin=me.role==='super_admin';$('tenant-form').closest('.panel').classList.toggle('hidden',!superAdmin);document.querySelector('#user-role option[value="super_admin"]').hidden=!superAdmin;document.querySelector('[data-view="system"]').classList.toggle('hidden',!superAdmin);
   ['businesses','branches','users','customers'].forEach(k=>$(k).textContent=s[k]??'—');
@@ -97,7 +97,7 @@ async function resumeSession(){if(!token){showLoginScreen('');return}setSessionL
 resumeSession();
 (function(){function mountAnalyticsAdmin(){const view=$('view-analytics'),head=view?.querySelector('.panel-title');if(!head||currentMe?.role!=='super_admin'||$('analytics-clear'))return;if(!head.querySelector('.analytics-admin-actions'))head.insertAdjacentHTML('beforeend','<div class="analytics-admin-actions"><button id="analytics-edit-totals" type="button" class="secondary">✏️ Editar totales</button><button id="analytics-clear" type="button" class="danger">🗑️ Borrar estadísticas</button></div>');$('analytics-edit-totals').onclick=async()=>{const days=+$('analytics-days')?.value||30;const data=window.__analyticsData||{};const fields=[['visits','Visitas página cliente'],['unique_visitors','Visitantes únicos'],['landing_visits','Visitas web Loyalty'],['ad_impressions','Impresiones de anuncios'],['ad_closes','Cierres de anuncios']];const values={};for(const [key,label] of fields){const value=prompt(label+' para '+days+' días:',String(data[key]??0));if(value===null)return;if(!/^\d+$/.test(value)){showToast('Escribe solo números enteros','error');return}values[key]=Number(value)}try{const saved=await api('/api/analytics/overrides',{method:'PUT',body:JSON.stringify({tenant_id:+$('analytics-tenant').value,period_days:days,...values})});window.__analyticsData={...data,...values,override_values:values,manual_override:true,days};renderAnalyticsSnapshot?.(window.__analyticsData);showToast('Totales estadísticos guardados de forma permanente','success');await window.loadAnalytics?.()}catch(e){showToast(e.message,'error')}};if(!head.querySelector('#analytics-reset-totals'))head.querySelector('.analytics-admin-actions')?.insertAdjacentHTML('beforeend','<button id="analytics-reset-totals" type="button" class="secondary">↺ Usar datos reales</button>');if($('analytics-reset-totals')&&!$('analytics-reset-totals').dataset.bound){$('analytics-reset-totals').dataset.bound='1';$('analytics-reset-totals').addEventListener('click',async()=>{const days=+$('analytics-days')?.value||30;const id=+$('analytics-tenant')?.value||0;if(!id)return;try{await api('/api/analytics/overrides?tenant_id='+id+'&days='+days,{method:'DELETE'});showToast('Volvieron los datos reales','success');await window.loadAnalytics?.()}catch(e){showToast(e.message,'error')}});} $('analytics-clear').onclick=async()=>{const days=+$('analytics-days')?.value||30;if(prompt('Escribe BORRAR ESTADISTICAS para confirmar:')!=='BORRAR ESTADISTICAS')return;try{await api('/api/analytics?tenant_id='+(+$('analytics-tenant')?.value||0)+'&days='+days,{method:'DELETE'});showToast('Estadísticas borradas','success');$('analytics-refresh')?.click()}catch(e){showToast(e.message,'error')}}}setInterval(mountAnalyticsAdmin,800);document.addEventListener('click',e=>{if(e.target.closest('[data-view="analytics"]'))setTimeout(mountAnalyticsAdmin,100)})})();
 const dayNames=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-document.querySelector('.build-badge').textContent='BUILD 200 · CONTROL DE MÓDULOS · 8030';
+document.querySelector('.build-badge').textContent='BUILD 201 · CONTROL DE MÓDULOS · 8030';
 const hourOptions=Array.from({length:288},(_,index)=>`${String(Math.floor(index/12)).padStart(2,'0')}:${String(index%12*5).padStart(2,'0')}`).concat('23:59');
 const hourSelect=(kind,day,defaultValue)=>`<select class="day-${kind}" data-day="${day}" aria-label="${kind==='open'?'Apertura':'Cierre'} de ${dayNames[day]}">${hourOptions.map(time=>`<option value="${time}" ${time===defaultValue?'selected':''}>${ES.clock(time)}</option>`).join('')}</select>`;
 function setHourValue(select,value){if(![...select.options].some(option=>option.value===value))select.add(new Option(ES.clock(value),value));select.value=value}
@@ -333,9 +333,9 @@ const businessThemes={
 };
 
 // BUILD 049: mantener la identificación visual alineada con el backend.
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 200 · DISEÑO INTELIGENTE · 8030');
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 201 · DISEÑO INTELIGENTE · 8030');
 const buildTitle=document.querySelector('#dashboard header .eyebrow');
-if(buildTitle)buildTitle.textContent='NEGROSKY LOYALTY V3 · BUILD 200';
+if(buildTitle)buildTitle.textContent='NEGROSKY LOYALTY V3 · BUILD 201';
 function selectedTenantName(){const id=+$('branding-tenant').value;return tenants.find(x=>x.id===id)?.name||''}
 function suggestedTheme(){const name=selectedTenantName().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');if(/pizza|restaurante|comida|hamburg|parrilla|granizado|helado|postre/.test(name))return /cafe|postre|granizado|helado/.test(name)?'coffee':'food';if(/cafe|panader|repost/.test(name))return'coffee';if(/belleza|peluquer|barber|spa|unas/.test(name))return'beauty';if(/mascota|veterinar|pet|canino|felino/.test(name))return'pets';if(/salud|clinica|odont|farmacia|terapia/.test(name))return'health';if(/gym|gimnas|fitness|deport/.test(name))return'fitness';if(/piscina|recrea|parque|turismo/.test(name))return'pool';if(/boutique|premium|joya|hotel/.test(name))return'premium';return'retail'}
 function optionalBrandingValue(id){return $(id).value.trim()||null}
@@ -444,8 +444,8 @@ applyActiveTenant=function(){applyActiveTenant055();const active=$('active-tenan
 $('active-tenant').onchange=applyActiveTenant;
 
 function applyFeatureVisibility(){
-  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 200';
-  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 200 · MÓDULOS POR NEGOCIO · 8030';
+  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 201';
+  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 201 · MÓDULOS POR NEGOCIO · 8030';
   const superAdmin=currentMe?.role==='super_admin';
   const adminPreviewActive=superAdmin&&adminPreviewTenant055===activeTenantId055()&&!!adminPreviewModules055;
   const enabled=new Set(adminPreviewActive?Object.entries(adminPreviewModules055).filter(([,value])=>value).map(([key])=>key):(superAdmin?[]:(currentMe?.enabled_modules||[])));
@@ -606,10 +606,10 @@ setTimeout(()=>{const modal=document.getElementById('onboarding-modal');if(!moda
 (function(){const originalApi=api,cache=new Map(),livePath=path=>/\/api\/(notifications\/stream|public\/me\/notifications|raffles\/tickets\/pending|public\/me\/raffle-operations)(?:[?/]|$)/.test(path);api=async function(path,o={}){if(o.method&&o.method!=='GET'||livePath(path))return originalApi(path,o);const key=path,now=Date.now(),hit=cache.get(key);if(hit&&now-hit.time<10000)return hit.promise;const promise=originalApi(path,o).catch(e=>{cache.delete(key);throw e});cache.set(key,{time:now,promise});return promise}})();
 
 // BUILD 068 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 200 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 200';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 201 · MÓDULOS POR NEGOCIO');const buildHeader=document.querySelector('#dashboard header .eyebrow');if(buildHeader)buildHeader.textContent='NEGROSKY LOYALTY V3 · BUILD 201';
 
 // BUILD 069 visible
-document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 200 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 200';
+document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 201 · MÓDULOS POR NEGOCIO');const buildHeader069=document.querySelector('#dashboard header .eyebrow');if(buildHeader069)buildHeader069.textContent='NEGROSKY LOYALTY V3 · BUILD 201';
 
 
 // Estadísticas: visitas anónimas, alcance de publicidad y campañas activas.
@@ -637,7 +637,7 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 200 
   $('active-tenant')?.addEventListener('change',()=>{selectTenant();if(!$('view-analytics')?.classList.contains('hidden'))loadAnalytics()});
 })();
 
-// BUILD 200 · Reparación final de acciones del administrador.
+// BUILD 201 · Reparación final de acciones del administrador.
 // Estas asignaciones tardías sobreviven a errores de módulos opcionales y mantienen
 // disponibles diseño y respaldos aunque el panel se abra desde una sesión antigua.
 (function(){
@@ -660,4 +660,30 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 200 
   }
   bindCoreActions();setTimeout(bindCoreActions,300);setTimeout(bindCoreActions,1200);
   document.addEventListener('click',e=>{const b=e.target.closest('[data-view="system"]');if(b)setTimeout(bindCoreActions,0)});
+})();
+
+// BUILD 201 · Guardado visual con confirmación de persistencia.
+(function(){
+  const form=$('branding-form');
+  if(!form||form.dataset.designSave201)return;
+  form.dataset.designSave201='1';
+  form.addEventListener('submit',async function(event){
+    event.preventDefault();event.stopImmediatePropagation();
+    const id=Number($('branding-tenant')?.value||0),message=$('branding-message');
+    if(!id){if(message)message.textContent='Selecciona primero el negocio que vas a diseñar.';return}
+    const submit=form.querySelector('button[type="submit"]');if(submit){submit.disabled=true;submit.dataset.oldText=submit.textContent;submit.textContent='Guardando diseño…'}
+    try{
+      const payload=brandingBody();
+      const saved=await api(`/api/branding?tenant_id=${id}`,{method:'PUT',body:JSON.stringify(payload)});
+      if(brandingLogoData)await api('/api/branding/logo',{method:'POST',body:JSON.stringify({tenant_id:id,data_url:brandingLogoData})});
+      if(brandingBackgroundData)await api('/api/branding/background',{method:'POST',body:JSON.stringify({tenant_id:id,data_url:brandingBackgroundData})});
+      brandingLogoData=null;brandingBackgroundData=null;
+      const check=await api(`/api/branding?tenant_id=${id}&verify=${Date.now()}`);
+      if(String(check.theme_key||'custom')!==String(payload.theme_key||'custom'))throw Error('El servidor no confirmó el tema seleccionado.');
+      currentBranding=check;setBrandingFields(check);updateBrandingPreview();
+      if(message)message.textContent='Diseño guardado y verificado. Ya está publicado para el cliente.';
+      showToast('Diseño guardado correctamente','success');
+    }catch(error){if(message)message.textContent='No se pudo guardar el diseño: '+(error.message||'Error desconocido');showToast(error.message||'No se pudo guardar el diseño','error')}
+    finally{if(submit){submit.disabled=false;submit.textContent=submit.dataset.oldText||'Guardar diseño'}}
+  },true);
 })();
