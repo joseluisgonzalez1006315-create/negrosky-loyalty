@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.213")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.215")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -4004,9 +4004,10 @@ def my_appointments(customer=Depends(current_customer)):
             return []
         rows = con.execute(
             """SELECT a.*,s.name service_name,s.duration_minutes,b.name branch_name,b.city,
-            t.timezone tenant_timezone
+            t.name tenant_name,t.timezone tenant_timezone,bb.whatsapp_number business_whatsapp
             FROM appointments a JOIN appointment_services s ON s.id=a.service_id
             JOIN branches b ON b.id=a.branch_id JOIN tenants t ON t.id=a.tenant_id
+            LEFT JOIN business_branding bb ON bb.tenant_id=a.tenant_id
             WHERE a.customer_id=? AND a.tenant_id=?
             ORDER BY a.starts_at DESC LIMIT 100""", (customer["id"], customer["tenant_id"]),
         ).fetchall()
@@ -4100,7 +4101,7 @@ def list_appointments(tenant_id: int | None = None, branch_id: int | None = None
 
 
 @app.get("/api/worker/appointments")
-def worker_appointments(user=Depends(require("worker", "branch_admin"))):
+def worker_appointments(days: int = 31, user=Depends(require("worker", "branch_admin"))):
     if not user["tenant_id"] or not user["branch_id"]:
         raise HTTPException(status_code=403, detail="Tu cuenta necesita una sucursal asignada")
     with connection() as con:
@@ -4112,15 +4113,21 @@ def worker_appointments(user=Depends(require("worker", "branch_admin"))):
             zone = timezone(timedelta(hours=-5))
         today = datetime.now(zone).date()
         begin = datetime(today.year, today.month, today.day, tzinfo=zone).astimezone(timezone.utc)
-        after_tomorrow = today + timedelta(days=2)
-        end = datetime(after_tomorrow.year, after_tomorrow.month, after_tomorrow.day,
+        # La agenda del trabajador debe incluir todas las citas próximas, no solo
+        # las de hoy y mañana. Se limita el horizonte para mantener una respuesta
+        # rápida incluso cuando el negocio tiene mucho historial.
+        days = max(1, min(int(days or 31), 180))
+        end_date = today + timedelta(days=days + 1)
+        end = datetime(end_date.year, end_date.month, end_date.day,
                        tzinfo=zone).astimezone(timezone.utc)
         rows = con.execute("""SELECT a.id,a.starts_at,a.ends_at,a.estimated_end_at,a.delay_minutes,
-            a.status,c.name customer_name,s.name service_name,s.duration_minutes,t.timezone tenant_timezone
+            a.status,a.cancellation_reason,a.cancelled_by,c.name customer_name,c.phone customer_phone,
+            s.name service_name,s.duration_minutes,b.name branch_name,t.name tenant_name,t.timezone tenant_timezone
             FROM appointments a JOIN customers c ON c.id=a.customer_id
-            JOIN appointment_services s ON s.id=a.service_id JOIN tenants t ON t.id=a.tenant_id
+            JOIN appointment_services s ON s.id=a.service_id JOIN branches b ON b.id=a.branch_id
+            JOIN tenants t ON t.id=a.tenant_id
             WHERE a.tenant_id=? AND a.branch_id=? AND a.status IN ('scheduled','confirmed')
-            AND a.starts_at>=? AND a.starts_at<? ORDER BY a.starts_at LIMIT 100""",
+            AND a.starts_at>=? AND a.starts_at<? ORDER BY a.starts_at LIMIT 2000""",
             (user["tenant_id"], user["branch_id"], begin.isoformat(), end.isoformat())).fetchall()
     return [row_dict(row) for row in rows]
 
@@ -4128,8 +4135,13 @@ def worker_appointments(user=Depends(require("worker", "branch_admin"))):
 @app.put("/api/appointments/{appointment_id}/status")
 def update_appointment_status(appointment_id: int, data: AppointmentStatusInput,
                               user=Depends(require("super_admin", "business_admin", "branch_admin", "worker"))):
+    reason = (data.reason or "").strip() or None
     with connection() as con:
-        appointment = con.execute("SELECT * FROM appointments WHERE id=?", (appointment_id,)).fetchone()
+        appointment = con.execute("""SELECT a.*,c.name customer_name,c.phone customer_phone,
+            s.name service_name,b.name branch_name,t.name tenant_name,t.timezone tenant_timezone
+            FROM appointments a JOIN customers c ON c.id=a.customer_id
+            JOIN appointment_services s ON s.id=a.service_id JOIN branches b ON b.id=a.branch_id
+            JOIN tenants t ON t.id=a.tenant_id WHERE a.id=?""", (appointment_id,)).fetchone()
         if not appointment:
             raise HTTPException(status_code=404, detail="Cita no encontrada")
         tenant_scope(user, appointment["tenant_id"])
@@ -4141,15 +4153,27 @@ def update_appointment_status(appointment_id: int, data: AppointmentStatusInput,
         con.execute(
             """UPDATE appointments SET status=?,updated_at=CURRENT_TIMESTAMP,
             cancelled_at=CASE WHEN ?='cancelled' THEN ? ELSE cancelled_at END,
-            cancelled_by=CASE WHEN ?='cancelled' THEN 'business' ELSE cancelled_by END WHERE id=?""",
-            (data.status, data.status, datetime.now(timezone.utc).isoformat(), data.status, appointment_id),
+            cancelled_by=CASE WHEN ?='cancelled' THEN 'business' ELSE cancelled_by END,
+            cancellation_reason=CASE WHEN ?='cancelled' THEN ? ELSE cancellation_reason END WHERE id=?""",
+            (data.status, data.status, datetime.now(timezone.utc).isoformat(), data.status,
+             data.status, reason, appointment_id),
         )
         audit(con, user, data.status, "appointment", appointment_id)
         if data.status == "cancelled":
+            detail = "La cita fue cancelada por el negocio. Consulta la agenda para reservar otra hora."
+            if reason:
+                detail += f" Motivo: {reason}"
             add_notification(con, appointment["tenant_id"], appointment["branch_id"], appointment["customer_id"],
                              "appointment_cancelled", "Cita cancelada por el negocio",
-                             "La cita fue cancelada por el negocio. Consulta la agenda para reservar otra hora.")
-    return {"status": data.status}
+                             detail)
+    return {"status": data.status, "cancellation_reason": reason,
+            "customer_name": appointment["customer_name"],
+            "customer_phone": appointment["customer_phone"],
+            "service_name": appointment["service_name"],
+            "branch_name": appointment["branch_name"],
+            "tenant_name": appointment["tenant_name"],
+            "starts_at": appointment["starts_at"],
+            "tenant_timezone": appointment["tenant_timezone"]}
 
 
 @app.post("/api/appointments/{appointment_id}/delay")

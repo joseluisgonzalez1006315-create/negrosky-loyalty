@@ -413,6 +413,8 @@ class AppointmentBookingInput(BaseModel):
 
 class AppointmentStatusInput(BaseModel):
     status: Literal["scheduled", "confirmed", "completed", "cancelled", "no_show"]
+    # Motivo opcional que el negocio puede dejar al cancelar una cita.
+    reason: str | None = Field(default=None, max_length=500)
 
 
 class AppointmentCancelInput(BaseModel):

@@ -308,12 +308,20 @@ async function loadAppointmentAvailability(){
     if(!available){$('appointment-availability').textContent=data.next_available_date?`No quedan citas disponibles el ${date}. El próximo día con cupos es ${data.next_available_date}.`:`No quedan citas disponibles el ${date}. Prueba con otra fecha.`;showToast('No hay más citas ese día. Elige el próximo día disponible.')}else $('appointment-availability').textContent=`${available} hora(s) disponible(s). Horario local del negocio. Elige la hora que prefieras.`;
   }catch(e){select.innerHTML='<option value="">Sin horarios disponibles</option>';$('appointment-availability').textContent=e.message;showToast(e.message,'error')}
 }
+let customerAppointmentRows=[];
+function customerAppointmentWhatsappHref(row,reason){
+  const phone=whatsappDigits(row?.business_whatsapp);
+  if(!phone)return '';
+  const when=ES.dateTime(row.starts_at,row.tenant_timezone);
+  const message=`Hola ${row.tenant_name||'equipo del negocio'} 👋\n\nSoy ${customerAppointmentCustomerName||'el cliente'} y necesito excusarme de mi cita.\n\n📍 Sucursal: ${row.branch_name||''}\n📅 Fecha y hora: ${when}\n💇 Servicio: ${row.service_name||''}\n📝 Motivo: ${reason||'No podré asistir a la cita.'}`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
 async function loadMyAppointments(){
-  try{const rows=await api('/api/public/me/appointments');$('customer-appointments').innerHTML=rows.length?'<h3>Mis citas</h3>'+rows.map(x=>{
+  try{const rows=await api('/api/public/me/appointments');customerAppointmentRows=rows;$('customer-appointments').innerHTML=rows.length?'<h3>Mis citas</h3>'+rows.map(x=>{
     const active=['scheduled','confirmed'].includes(x.status)&&new Date(x.starts_at)>new Date();
     const delayed=x.delay_minutes?`<p class="delay-warning">Demora aproximada: ${x.delay_minutes} minutos. Fin estimado: ${ES.appointmentTime(x.estimated_end_at,x.tenant_timezone)}.</p>`:'';
-    const cancel=x.status==='cancelled'&&x.cancellation_reason?`<p>Motivo de cancelación: ${ES.escape(x.cancellation_reason)}</p>`:'';
-    return `<div class="history-item"><p><b>${ES.escape(x.service_name)}</b> · ${ES.appointmentStates[x.status]||ES.escape(x.status)}</p><p>${ES.escape(x.branch_name)}${x.city?' · '+ES.escape(x.city):''}</p><p>Duración aproximada: ${x.duration_minutes} minutos</p><p class="history-date">${ES.dateTime(x.starts_at,x.tenant_timezone)}</p>${delayed}${cancel}${active?`<details class="cancel-appointment"><summary>Cancelar esta cita</summary><form data-cancel-id="${x.id}"><label>Cuéntanos el motivo<textarea name="reason" rows="2" minlength="5" maxlength="500" required placeholder="Ejemplo: no podré asistir ese día"></textarea></label><button type="submit" class="secondary full">Confirmar cancelación</button></form></details>`:''}</div>`
+    const cancel=x.status==='cancelled'&&x.cancellation_reason?`<p class="appointment-cancellation-reason">${x.cancelled_by==='business'?'Motivo del negocio':'Motivo de cancelación'}: ${ES.escape(x.cancellation_reason)}</p>`:'';
+    return `<div class="history-item"><p><b>${ES.escape(x.service_name)}</b> · ${ES.appointmentStates[x.status]||ES.escape(x.status)}</p><p>${ES.escape(x.branch_name)}${x.city?' · '+ES.escape(x.city):''}</p><p>Duración aproximada: ${x.duration_minutes} minutos</p><p class="history-date">${ES.dateTime(x.starts_at,x.tenant_timezone)}</p>${delayed}${cancel}${active?`<details class="cancel-appointment"><summary>Cancelar esta cita</summary><form data-cancel-id="${x.id}"><label>Cuéntanos el motivo<textarea name="reason" rows="2" minlength="5" maxlength="500" required placeholder="Ejemplo: no podré asistir ese día"></textarea></label><button type="submit" class="secondary full">Confirmar cancelación</button>${x.business_whatsapp?`<button type="button" class="whatsapp-action full" data-appointment-whatsapp="${x.id}">💬 Avisar por WhatsApp</button>`:''}</form></details>`:''}</div>`
   }).join(''):''}catch(e){$('customer-appointments').textContent='No fue posible consultar tus citas.'}
 }
 $('customer-appointments').addEventListener('submit',async event=>{
@@ -321,6 +329,16 @@ $('customer-appointments').addEventListener('submit',async event=>{
   event.preventDefault();const button=form.querySelector('button');button.disabled=true;
   try{await api(`/api/public/me/appointments/${form.dataset.cancelId}/cancel`,{method:'POST',body:JSON.stringify({reason:form.elements.reason.value.trim()})});showToast('Tu cita quedó cancelada. El horario volvió a estar disponible.','success');await Promise.all([loadMyAppointments(),loadAppointmentDates()])}
   catch(e){showToast(e.message,'error');button.disabled=false}
+});
+$('customer-appointments').addEventListener('click',event=>{
+  const button=event.target.closest('[data-appointment-whatsapp]');
+  if(!button)return;
+  const row=customerAppointmentRows.find(x=>String(x.id)===String(button.dataset.appointmentWhatsapp));
+  if(!row)return;
+  const reason=(prompt('Escribe el motivo que quieres enviar al negocio:','')||'').trim();
+  if(!reason){showToast('Escribe un motivo para enviar el aviso.','error');return}
+  const href=customerAppointmentWhatsappHref(row,reason);
+  if(href)window.open(href,'_blank','noopener');
 });
 function whatsappDigits(value){
   let digits=String(value||'').replace(/\D/g,'');

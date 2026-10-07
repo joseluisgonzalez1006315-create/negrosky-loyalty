@@ -198,7 +198,8 @@ function appointmentWhatsAppHref(row){
   if(phone.length===10&&phone.startsWith('3'))phone='57'+phone;
   if(!phone)return '';
   const zone=businessCalendarZone(),when=ES.dateTime(row.starts_at,zone);
-  const text=`Hola ${row.customer_name||''}, te contactamos de parte del negocio sobre tu cita.\nServicio: ${row.service_name||''}\nSucursal: ${row.branch_name||''}\nFecha y hora: ${when}`;
+  const reason=row.cancellation_reason&&row.cancelled_by==='business'?`\nMotivo del negocio: ${row.cancellation_reason}`:'';
+  const text=`Hola ${row.customer_name||''}, te contactamos de parte del negocio sobre tu cita.\nServicio: ${row.service_name||''}\nSucursal: ${row.branch_name||''}\nFecha y hora: ${when}${reason}`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 function renderAppointmentCalendar(){
@@ -237,7 +238,17 @@ setInterval(()=>{if(currentMe&&!document.hidden&&!$('view-appointments').classLi
 $('calendar-day-agenda').addEventListener('submit',async event=>{const form=event.target.closest('.delay-form');if(!form)return;event.preventDefault();const button=form.querySelector('button');button.disabled=true;try{const response=await api(`/api/appointments/${form.dataset.delayId}/delay`,{method:'POST',body:JSON.stringify({delay_minutes:+form.elements.minutes.value,reason:form.elements.reason.value||null})});showToast(response.affected_count?`Demora registrada. ${response.affected_count} cita(s) podrían verse afectadas.`:'Demora actualizada.','success');await loadAppointments()}catch(e){showToast(e.message,'error');button.disabled=false}});
 $('appointment-service-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/appointment-services',{method:'POST',body:JSON.stringify({tenant_id:+$('appointment-tenant').value,branch_id:+$('appointment-branch').value||null,name:$('appointment-service-name').value,duration_minutes:+$('appointment-duration').value,price:$('appointment-price').value?+$('appointment-price').value:null})});$('appointment-message').textContent='Servicio agregado. Ya puede aparecer en la página del cliente.';showToast('Servicio de citas agregado.','success');e.target.reset();$('appointment-duration').value=30;await loadAppointmentServices()}catch(x){$('appointment-message').textContent=x.message;showToast(x.message,'error')}};
 async function setAppointmentService(id,active){try{await api('/api/appointment-services/'+id+'/status',{method:'PUT',body:JSON.stringify({active})});await loadAppointmentServices()}catch(e){alert(e.message)}}
-async function setAppointmentStatus(id,status){if(!status)return;try{await api('/api/appointments/'+id+'/status',{method:'PUT',body:JSON.stringify({status})});await loadAppointments()}catch(e){alert(e.message)}}
+async function setAppointmentStatus(id,status){
+  if(!status)return;
+  let reason=null;
+  if(status==='cancelled'){
+    reason=(prompt('Motivo opcional para el cliente (puedes dejarlo vacío):','')||'').trim()||null;
+  }
+  try{
+    await api('/api/appointments/'+id+'/status',{method:'PUT',body:JSON.stringify({status,reason})});
+    await loadAppointments();
+  }catch(e){alert(e.message)}
+}
 $('appointment-tenant').onchange=()=>{calendarCursor=null;calendarSelected=null;loadAppointmentBranches()};$('appointment-branch').onchange=()=>Promise.all([loadAppointmentServices(),loadAppointments()]);$('refresh-appointments').onclick=loadAppointments;
 
 let adminNotificationItems=[];
