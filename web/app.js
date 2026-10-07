@@ -193,6 +193,7 @@ async function loadAppointmentServices(){
 let calendarCursor=null,calendarSelected=null,calendarRows=[];
 function businessCalendarZone(){const tenantId=+$('appointment-tenant').value;return tenants.find(x=>x.id===tenantId)?.timezone||'America/Bogota'}
 function currentCalendarMonth(){if(!calendarCursor){const today=ES.dayKey(new Date(),businessCalendarZone());calendarCursor=today.slice(0,7);calendarSelected=today}return calendarCursor}
+function adminDismissedAppointment(id){try{return localStorage.getItem(`negrosky_admin_hidden_appointment_${id}`)==='1'}catch(_){return false}}
 function appointmentWhatsAppHref(row){
   let phone=String(row?.customer_phone||'').replace(/\D/g,'');
   if(phone.length===10&&phone.startsWith('3'))phone='57'+phone;
@@ -203,11 +204,11 @@ function appointmentWhatsAppHref(row){
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 function renderAppointmentCalendar(){
-  const month=currentCalendarMonth(),zone=businessCalendarZone(),[year,number]=month.split('-').map(Number);
+  const month=currentCalendarMonth(),zone=businessCalendarZone(),[year,number]=month.split('-').map(Number),visibleCalendarRows=calendarRows.filter(x=>!adminDismissedAppointment(x.id));
   const start=(new Date(Date.UTC(year,number-1,1)).getUTCDay()+6)%7;
   const days=new Date(Date.UTC(year,number,0)).getUTCDate();
   $('calendar-month').textContent=new Intl.DateTimeFormat('es-CO',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(Date.UTC(year,number-1,1)));
-  const counts={};calendarRows.forEach(x=>{const key=ES.dayKey(x.starts_at,zone);if(key.startsWith(month)){counts[key]??={active:0,cancelled:0};counts[key][x.status==='cancelled'?'cancelled':'active']++}});
+  const counts={};visibleCalendarRows.forEach(x=>{const key=ES.dayKey(x.starts_at,zone);if(key.startsWith(month)){counts[key]??={active:0,cancelled:0};counts[key][x.status==='cancelled'?'cancelled':'active']++}});
   const cells=Array.from({length:start},()=>'<span class="calendar-empty"></span>');
   for(let day=1;day<=days;day++){
     const key=`${month}-${String(day).padStart(2,'0')}`,count=counts[key];
@@ -216,14 +217,15 @@ function renderAppointmentCalendar(){
   $('appointment-calendar').innerHTML='<div class="calendar-weekdays">'+['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(x=>`<b>${x}</b>`).join('')+'</div><div class="calendar-grid">'+cells.join('')+'</div>';
   const date=calendarSelected||`${month}-01`;
   $('calendar-day-title').textContent=new Intl.DateTimeFormat('es-CO',{dateStyle:'full',timeZone:'UTC'}).format(new Date(`${date}T12:00:00Z`));
-  const dayRows=calendarRows.filter(x=>ES.dayKey(x.starts_at,zone)===date).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
+  const dayRows=visibleCalendarRows.filter(x=>ES.dayKey(x.starts_at,zone)===date).sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
   $('calendar-day-agenda').innerHTML=dayRows.length?dayRows.map(x=>{
     const active=['scheduled','confirmed'].includes(x.status);
     const delay=x.delay_minutes?`<p class="delay-warning">Demora aproximada: ${x.delay_minutes} minutos · Fin estimado: ${ES.appointmentTime(x.estimated_end_at,zone)}</p>`:'';
     const reason=x.cancellation_reason?`<p>Motivo de cancelación: ${ES.escape(x.cancellation_reason)}</p>`:'';
-    return `<article class="calendar-event ${x.status==='cancelled'?'cancelled':''}"><div class="calendar-event-time">${ES.appointmentTime(x.starts_at,zone)}</div><div><b>${ES.escape(x.customer_name)}</b> <span class="calendar-state">${ES.appointmentStates[x.status]||ES.escape(x.status)}</span><p>${ES.escape(x.service_name)} · ${ES.escape(x.branch_name)}</p><p>Duración aproximada: ${x.duration_minutes||Math.round((new Date(x.ends_at)-new Date(x.starts_at))/60000)} minutos · Teléfono: ${ES.escape(x.customer_phone)}</p>${appointmentWhatsAppHref(x)?`<a class="whatsapp-action" href="${appointmentWhatsAppHref(x)}" target="_blank" rel="noopener">💬 WhatsApp al cliente</a>`:''}${delay}${reason}${active?ES.delayForm(x.id,x.delay_minutes||0):''}<select aria-label="Cambiar estado de la cita" ${active?'':'disabled'} onchange="setAppointmentStatus(${x.id},this.value)"><option value="">Cambiar estado…</option><option value="confirmed">Confirmar</option><option value="completed">Completada</option><option value="cancelled">Cancelar</option><option value="no_show">No asistió</option></select></div></article>`
+    const dismiss=x.status==='cancelled'?`<button type="button" class="dismiss-appointment" data-admin-dismiss-appointment="${x.id}" aria-label="Ocultar esta cita">×</button>`:'';
+    return `<article class="calendar-event ${x.status==='cancelled'?'cancelled':''}">${dismiss}<div class="calendar-event-time">${ES.appointmentTime(x.starts_at,zone)}</div><div><b>${ES.escape(x.customer_name)}</b> <span class="calendar-state">${ES.appointmentStates[x.status]||ES.escape(x.status)}</span><p>${ES.escape(x.service_name)} · ${ES.escape(x.branch_name)}</p><p>Duración aproximada: ${x.duration_minutes||Math.round((new Date(x.ends_at)-new Date(x.starts_at))/60000)} minutos · Teléfono: ${ES.escape(x.customer_phone)}</p>${appointmentWhatsAppHref(x)?`<a class="whatsapp-action" href="${appointmentWhatsAppHref(x)}" target="_blank" rel="noopener">💬 WhatsApp al cliente</a>`:''}${delay}${reason}${active?ES.delayForm(x.id,x.delay_minutes||0):''}<select aria-label="Cambiar estado de la cita" ${active?'':'disabled'} onchange="setAppointmentStatus(${x.id},this.value)"><option value="">Cambiar estado…</option><option value="confirmed">Confirmar</option><option value="completed">Completada</option><option value="cancelled">Cancelar</option><option value="no_show">No asistió</option></select></div></article>`
   }).join(''):'<p class="muted">No hay citas para este día.</p>';
-  $('appointment-list').innerHTML=calendarRows.length?`<table><tr><th>Fecha y hora</th><th>Cliente</th><th>Servicio</th><th>Sucursal</th><th>Estado</th></tr>${calendarRows.map(x=>`<tr><td>${ES.dateTime(x.starts_at,zone)}</td><td>${ES.escape(x.customer_name)}<br><small>${ES.escape(x.customer_phone)}</small></td><td>${ES.escape(x.service_name)}</td><td>${ES.escape(x.branch_name)}</td><td>${ES.appointmentStates[x.status]||ES.escape(x.status)}</td></tr>`).join('')}</table>`:'<p class="muted">Todavía no hay citas registradas este mes.</p>';
+  $('appointment-list').innerHTML=visibleCalendarRows.length?`<table><tr><th>Fecha y hora</th><th>Cliente</th><th>Servicio</th><th>Sucursal</th><th>Estado</th></tr>${visibleCalendarRows.map(x=>`<tr><td>${ES.dateTime(x.starts_at,zone)}</td><td>${ES.escape(x.customer_name)}<br><small>${ES.escape(x.customer_phone)}</small></td><td>${ES.escape(x.service_name)}</td><td>${ES.escape(x.branch_name)}</td><td>${ES.appointmentStates[x.status]||ES.escape(x.status)}</td></tr>`).join('')}</table>`:'<p class="muted">Todavía no hay citas registradas este mes.</p>';
 }
 async function loadAppointments(){
   const tenantId=+$('appointment-tenant').value,branchId=$('appointment-branch').value;
@@ -236,6 +238,7 @@ function navigateCalendar(offset){const [year,month]=currentCalendarMonth().spli
 $('calendar-prev').onclick=()=>navigateCalendar(-1);$('calendar-next').onclick=()=>navigateCalendar(1);
 setInterval(()=>{if(currentMe&&!document.hidden&&!$('view-appointments').classList.contains('hidden'))loadAppointments()},20000);
 $('calendar-day-agenda').addEventListener('submit',async event=>{const form=event.target.closest('.delay-form');if(!form)return;event.preventDefault();const button=form.querySelector('button');button.disabled=true;try{const response=await api(`/api/appointments/${form.dataset.delayId}/delay`,{method:'POST',body:JSON.stringify({delay_minutes:+form.elements.minutes.value,reason:form.elements.reason.value||null})});showToast(response.affected_count?`Demora registrada. ${response.affected_count} cita(s) podrían verse afectadas.`:'Demora actualizada.','success');await loadAppointments()}catch(e){showToast(e.message,'error');button.disabled=false}});
+$('calendar-day-agenda').addEventListener('click',event=>{const button=event.target.closest('[data-admin-dismiss-appointment]');if(!button)return;try{localStorage.setItem(`negrosky_admin_hidden_appointment_${button.dataset.adminDismissAppointment}`,'1')}catch(_){}renderAppointmentCalendar()});
 $('appointment-service-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/appointment-services',{method:'POST',body:JSON.stringify({tenant_id:+$('appointment-tenant').value,branch_id:+$('appointment-branch').value||null,name:$('appointment-service-name').value,duration_minutes:+$('appointment-duration').value,price:$('appointment-price').value?+$('appointment-price').value:null})});$('appointment-message').textContent='Servicio agregado. Ya puede aparecer en la página del cliente.';showToast('Servicio de citas agregado.','success');e.target.reset();$('appointment-duration').value=30;await loadAppointmentServices()}catch(x){$('appointment-message').textContent=x.message;showToast(x.message,'error')}};
 async function setAppointmentService(id,active){try{await api('/api/appointment-services/'+id+'/status',{method:'PUT',body:JSON.stringify({active})});await loadAppointmentServices()}catch(e){alert(e.message)}}
 async function setAppointmentStatus(id,status){
