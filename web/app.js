@@ -799,7 +799,7 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
   });
 })();
 
-/* Build 232: editor visual organizado en secciones desplegables. */
+/* Build 233: editor visual organizado en secciones desplegables. */
 (function initDesignerAccordion(){
   function setup(){
     const form=document.getElementById('branding-form');
@@ -833,7 +833,7 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup,{once:true}); else setup();
 })();
-/* Build 232: grupos visuales del menú lateral. */
+/* Build 233: grupos visuales del menú lateral. */
 (function initNavGroups(){
   function setup(){
     const nav=document.querySelector('.dashboard>.tabs');
