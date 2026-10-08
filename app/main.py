@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.220")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.246")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -882,13 +882,13 @@ MODULE_CATALOG = {
 MODULE_KEYS = set(MODULE_CATALOG)
 DEFAULT_MODULES = {
     "loyalty": True,
-    "appointments": False,
-    "time_sales": False,
-    "notifications": False,
+    "appointments": True,
+    "time_sales": True,
+    "notifications": True,
     "public_page": True,
     "raffles": True,
     "roulette": True,
-    "collaborations": False,
+    "collaborations": True,
 }
 
 
@@ -921,6 +921,7 @@ def sync_module_defaults():
             con.execute("SAVEPOINT negrosky_module_sync")
             try:
                 initialize_tenant_modules(con, tenant_id)
+                repair_empty_module_state(con, tenant_id)
                 onboarding = con.execute(
                     "SELECT 1 FROM tenant_onboarding WHERE tenant_id=? LIMIT 1",
                     (tenant_id,),
@@ -946,6 +947,27 @@ def sync_module_defaults():
 
 def effective_modules(con, tenant_id: int, branch_id: int | None = None):
     return {key: module_enabled(con, tenant_id, key, branch_id) for key in MODULE_KEYS}
+
+
+def repair_empty_module_state(con, tenant_id: int) -> bool:
+    """Recover only an inconsistent all-disabled legacy module configuration."""
+    rows = con.execute(
+        "SELECT module_key FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL",
+        (tenant_id,),
+    ).fetchall()
+    if not rows or any(module_enabled(con, tenant_id, key) for key in MODULE_KEYS):
+        return False
+    # El panel quedó completamente desactivado. Recuperamos el catálogo
+    # completo que el administrador venía usando, incluida Notificaciones.
+    # Las funciones sin configuración no muestran contenido al cliente hasta
+    # que el negocio las configure.
+    values = {key: True for key in MODULE_KEYS}
+    con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (tenant_id,))
+    con.executemany(
+        "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, NULL, ?, ?)",
+        [(tenant_id, key, int(values[key])) for key in MODULE_KEYS],
+    )
+    return True
 DEFAULT_HOURS = [
     {"weekday": day, "enabled": True, "opens_at": "00:00", "closes_at": "23:59"}
     for day in range(7)
@@ -1312,7 +1334,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.213", "build": "213", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.246", "build": "246", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -2237,8 +2259,11 @@ def get_tenant_modules(tenant_id: int, branch_id: int | None = None,
             branch = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=?", (branch_id, scope)).fetchone()
             if not branch:
                 raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        repaired = False
+        if branch_id is None:
+            repaired = repair_empty_module_state(con, scope)
         return {"tenant_id": scope, "branch_id": branch_id,
-                "modules": effective_modules(con, scope, branch_id)}
+                "modules": effective_modules(con, scope, branch_id), "repaired": repaired}
 
 
 @app.put("/api/tenant-modules")
@@ -5070,7 +5095,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.213",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.246",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
