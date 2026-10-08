@@ -678,3 +678,31 @@ body.brand-customer #customer-profile-tools{z-index:100!important}
 
 /* Build 259: elimina navegación decorativa duplicada del hero; la fila inferior es la navegación funcional */
 body.brand-customer .customer-hero-meta,.preview-surface .customer-hero-meta{display:none!important}
+
+/* Build 262: rediseño estructural del cliente con apariencia de aplicación */
+@media(max-width:899px){
+ body.brand-customer{padding-bottom:86px!important}
+ body.brand-customer .mobile-shell{padding:9px 10px 18px!important}
+ body.brand-customer .public-brand-hero{display:grid;grid-template-columns:48px minmax(0,1fr);column-gap:11px;min-height:0!important;padding:13px 14px!important;border-radius:20px!important;margin-bottom:10px!important;box-shadow:0 12px 28px #0007!important}
+ body.brand-customer .public-brand-hero .brand-mark{grid-row:1/4;width:48px!important;height:48px!important;border-radius:15px!important}
+ body.brand-customer .public-brand-hero .eyebrow{grid-column:2;font-size:9px!important}
+ body.brand-customer .public-brand-hero h1{grid-column:2;font-size:1.35rem!important}
+ body.brand-customer .public-brand-hero .muted{grid-column:2;font-size:.74rem!important}
+ body.brand-customer .public-brand-hero .customer-hero-greeting{grid-column:2;grid-row:4;margin-top:7px!important;padding:5px 9px!important;font-size:.7rem!important}
+ body.brand-customer #customer-home{display:flex!important;flex-direction:column!important;gap:10px!important;padding-top:0!important}
+ body.brand-customer #customer-quick-actions{position:fixed!important;left:10px!important;right:10px!important;bottom:10px!important;top:auto!important;width:auto!important;z-index:90!important;display:flex!important;gap:5px!important;padding:7px!important;margin:0!important;border:1px solid #ffffff25!important;border-radius:18px!important;background:color-mix(in srgb,#11101b 90%,transparent)!important;box-shadow:0 12px 32px #000b!important;backdrop-filter:blur(16px)!important;overflow-x:auto!important}
+ body.brand-customer #customer-quick-actions button,body.brand-customer #customer-quick-actions a{flex:0 0 74px!important;width:74px!important;height:42px!important;min-height:42px!important;padding:4px 3px!important;border-radius:11px!important;font-size:.59rem!important;line-height:1.05!important;white-space:normal!important}
+ body.brand-customer #customer-quick-actions .install-action{display:none!important}
+ body.brand-customer #customer-home>#cards,body.brand-customer #customer-home>#rewards,body.brand-customer #customer-home>#customer-raffles,body.brand-customer #customer-home>#appointment-box,body.brand-customer #customer-home>#public-business-info{width:100%!important;margin:0!important}
+ body.brand-customer #customer-home>#cards .loyalty-card{border-radius:20px!important;padding:15px!important;box-shadow:0 12px 28px #0006!important}
+ body.brand-customer #customer-home>#cards .stamp-track{justify-content:space-between!important;gap:5px!important}
+ body.brand-customer #customer-home>#cards .stamp{width:40px!important;height:40px!important}
+ body.brand-customer #customer-home>#rewards,body.brand-customer #customer-home>#customer-raffles,body.brand-customer #customer-home>#appointment-box{border-radius:20px!important;box-shadow:0 12px 28px #0006!important}
+ body.brand-customer #public-business-info{order:4!important}
+}
+@media(min-width:900px){
+ body.brand-customer .public-brand-hero{min-height:0!important;padding:22px 26px!important}
+ body.brand-customer #customer-home{align-items:stretch!important}
+ body.brand-customer #customer-home>#cards .loyalty-card{box-shadow:0 18px 40px #0006!important}
+ body.brand-customer #customer-quick-actions{order:-1!important}
+}
