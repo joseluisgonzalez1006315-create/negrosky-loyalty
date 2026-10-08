@@ -461,3 +461,15 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 #branding-form>.branding-actions{position:sticky;bottom:12px;z-index:15;margin-top:22px;padding:10px;border:1px solid #6d55cc;border-radius:16px;background:#121021ed;backdrop-filter:blur(12px);box-shadow:0 12px 35px #0007}
 #branding-form>.branding-actions button{min-height:46px}
 @media(max-width:900px){.designer-section-heading{margin-top:18px}.designer-section-heading small{display:block}.branding-layout{grid-template-columns:1fr!important}.preview-panel{position:relative!important;top:auto!important}}
+/* Build 229 · compactar espacios del editor visual */
+#view-branding .branding-layout{align-items:start;gap:16px}
+#view-branding .branding-layout>.panel{min-width:0}
+#view-branding #branding-form{gap:10px;margin-top:16px}
+#view-branding #branding-form>label{margin:0}
+#view-branding .designer-section-heading{margin:14px 0 4px;padding:9px 12px}
+#view-branding .designer-section-heading>span{width:26px;height:26px;border-radius:8px}
+#view-branding .theme-box,#view-branding .background-framing,#view-branding .logo-settings,#view-branding .visibility-box,#view-branding .contact-settings,#view-branding .module-order,#view-branding .manual-layout{margin:0 0 4px;padding:14px}
+#view-branding .color-grid,#view-branding .designer-grid{gap:9px}
+#view-branding .preview-panel{margin:0;max-height:calc(100vh - 32px);overflow:auto}
+#view-branding .preview-panel>.branding-preview{margin-bottom:0}
+@media(max-width:900px){#view-branding .preview-panel{max-height:none;overflow:visible}}
