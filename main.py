@@ -42,7 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.244")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.185")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
 @app.middleware("http")
