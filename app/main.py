@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.216")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.218")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -4062,6 +4062,22 @@ def cancel_customer_appointment(appointment_id: int, data: AppointmentCancelInpu
     return {"status": "cancelled", "cancellation_reason": reason}
 
 
+@app.delete("/api/public/me/appointments/{appointment_id}")
+def delete_customer_appointment(appointment_id: int, customer=Depends(current_customer)):
+    """Permite al cliente limpiar una cita que ya no está activa de su historial."""
+    with connection() as con:
+        appointment = con.execute(
+            "SELECT id,tenant_id,branch_id,status FROM appointments WHERE id=? AND customer_id=?",
+            (appointment_id, customer["id"]),
+        ).fetchone()
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Cita no encontrada")
+        if appointment["status"] not in ("cancelled", "completed", "no_show"):
+            raise HTTPException(status_code=409, detail="Solo puedes borrar citas canceladas o finalizadas")
+        con.execute("DELETE FROM appointments WHERE id=?", (appointment_id,))
+    return {"status": "deleted", "id": appointment_id}
+
+
 @app.get("/api/appointments")
 def list_appointments(tenant_id: int | None = None, branch_id: int | None = None,
                       month: str | None = None,
@@ -4174,6 +4190,32 @@ def update_appointment_status(appointment_id: int, data: AppointmentStatusInput,
             "tenant_name": appointment["tenant_name"],
             "starts_at": appointment["starts_at"],
             "tenant_timezone": appointment["tenant_timezone"]}
+
+
+@app.delete("/api/appointments/{appointment_id}")
+def delete_finished_appointment(appointment_id: int,
+                                user=Depends(require("super_admin", "business_admin", "branch_admin", "worker"))):
+    """Elimina del registro una cita que ya no está activa.
+
+    Las citas programadas o confirmadas nunca se pueden borrar desde la X.
+    Las canceladas, completadas y no asistió sí se pueden retirar del panel.
+    """
+    with connection() as con:
+        appointment = con.execute(
+            "SELECT id,tenant_id,branch_id,status FROM appointments WHERE id=?",
+            (appointment_id,),
+        ).fetchone()
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Cita no encontrada")
+        tenant_scope(user, appointment["tenant_id"])
+        require_user_module(con, user, "appointments", appointment["branch_id"])
+        if user["role"] in ("branch_admin", "worker") and appointment["branch_id"] != user["branch_id"]:
+            raise HTTPException(status_code=403, detail="Cita fuera de tu sucursal")
+        if appointment["status"] not in ("cancelled", "completed", "no_show"):
+            raise HTTPException(status_code=409, detail="Solo puedes borrar citas canceladas o finalizadas")
+        audit(con, user, "delete", "appointment", appointment_id)
+        con.execute("DELETE FROM appointments WHERE id=?", (appointment_id,))
+    return {"status": "deleted", "id": appointment_id}
 
 
 @app.post("/api/appointments/{appointment_id}/delay")

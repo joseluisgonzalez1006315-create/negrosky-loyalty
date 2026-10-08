@@ -315,17 +315,28 @@ function customerAppointmentWhatsappHref(row,reason){
   const phone=whatsappDigits(row?.business_whatsapp);
   if(!phone)return '';
   const when=ES.dateTime(row.starts_at,row.tenant_timezone);
-  const message=`Hola ${row.tenant_name||'equipo del negocio'} 👋\n\nSoy ${customerAppointmentCustomerName||'el cliente'} y necesito excusarme de mi cita.\n\n📍 Sucursal: ${row.branch_name||''}\n📅 Fecha y hora: ${when}\n💇 Servicio: ${row.service_name||''}\n📝 Motivo: ${reason||'No podré asistir a la cita.'}`;
+  const message=`Hola ${row.tenant_name||'equipo del negocio'} 👋\n\nSoy ${customerAppointmentCustomerName||'el cliente'} y quiero comunicarme con ustedes sobre mi cita.\n\n💬 Mensaje: ${reason||'Quiero comunicarme sobre mi cita.'}\n\n📍 Sucursal: ${row.branch_name||''}\n📅 Fecha y hora: ${when}\n💇 Servicio: ${row.service_name||''}`;
   return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+function openAppointmentWhatsApp(href){
+  if(!href)return;
+  const mobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(!mobile){window.location.href=href;return}
+  try{
+    const url=new URL(href),phone=url.searchParams.get('phone')||'',text=url.searchParams.get('text')||'';
+    const appUrl=`whatsapp://send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}`;
+    window.location.href=appUrl;
+    setTimeout(()=>{if(document.visibilityState==='visible')window.location.href=href},900);
+  }catch(_){window.location.href=href}
 }
 async function loadMyAppointments(){
   try{const rows=await api('/api/public/me/appointments');customerAppointmentRows=rows;const visibleRows=rows.filter(x=>!dismissedAppointment(x.id));$('customer-appointments').innerHTML=visibleRows.length?'<h3>Mis citas</h3>'+visibleRows.map(x=>{
     const active=['scheduled','confirmed'].includes(x.status)&&new Date(x.starts_at)>new Date();
     const delayed=x.delay_minutes?`<p class="delay-warning">Demora aproximada: ${x.delay_minutes} minutos. Fin estimado: ${ES.appointmentTime(x.estimated_end_at,x.tenant_timezone)}.</p>`:'';
     const cancel=x.status==='cancelled'&&x.cancellation_reason?`<p class="appointment-cancellation-reason">${x.cancelled_by==='business'?'Motivo del negocio':'Motivo de cancelación'}: ${ES.escape(x.cancellation_reason)}</p>`:'';
-    const dismiss=x.status==='cancelled'?`<button type="button" class="dismiss-appointment" data-dismiss-appointment="${x.id}" aria-label="Ocultar esta cita">×</button>`:'';
-    const whatsapp=x.business_whatsapp?`<button type="button" class="whatsapp-action full" data-appointment-whatsapp="${x.id}">💬 Avisar por WhatsApp</button>`:'';
-    return `<div class="history-item appointment-card">${dismiss}<p><b>${ES.escape(x.service_name)}</b> · ${ES.appointmentStates[x.status]||ES.escape(x.status)}</p><p>${ES.escape(x.branch_name)}${x.city?' · '+ES.escape(x.city):''}</p><p>Duración aproximada: ${x.duration_minutes} minutos</p><p class="history-date">${ES.dateTime(x.starts_at,x.tenant_timezone)}</p>${delayed}${cancel}${whatsapp}${active?`<details class="cancel-appointment"><summary>Cancelar esta cita</summary><form data-cancel-id="${x.id}"><label>Cuéntanos el motivo<textarea name="reason" rows="2" minlength="5" maxlength="500" required placeholder="Ejemplo: no podré asistir ese día"></textarea></label><button type="submit" class="secondary full">Confirmar cancelación</button></form></details>`:''}</div>`
+    const dismiss=x.status==='cancelled'?`<button type="button" class="dismiss-appointment" data-dismiss-appointment="${x.id}" aria-label="Borrar esta cita">×</button>`:'';
+    const whatsapp=x.business_whatsapp?`<button type="button" class="whatsapp-action full" data-appointment-whatsapp="${x.id}">💬 Escribir mensaje y enviar por WhatsApp</button>`:'';
+    return `<div class="history-item appointment-card">${dismiss}<p><b>${ES.escape(x.service_name)}</b> · ${ES.appointmentStates[x.status]||ES.escape(x.status)}</p><p>${ES.escape(x.branch_name)}${x.city?' · '+ES.escape(x.city):''}</p><p>Duración aproximada: ${x.duration_minutes} minutos</p><p class="history-date">${ES.dateTime(x.starts_at,x.tenant_timezone)}</p>${delayed}${cancel}${active?`<details class="cancel-appointment"><summary>Cancelar esta cita</summary><form data-cancel-id="${x.id}"><label>Escribe el motivo de cancelación<textarea name="reason" rows="2" minlength="5" maxlength="500" required placeholder="Ejemplo: no podré asistir ese día"></textarea></label><button type="submit" class="secondary full">Confirmar cancelación</button>${whatsapp}</form></details>`:whatsapp}</div>`
   }).join(''):''}catch(e){$('customer-appointments').textContent='No fue posible consultar tus citas.'}
 }
 $('customer-appointments').addEventListener('submit',async event=>{
@@ -336,15 +347,22 @@ $('customer-appointments').addEventListener('submit',async event=>{
 });
 $('customer-appointments').addEventListener('click',event=>{
   const dismiss=event.target.closest('[data-dismiss-appointment]');
-  if(dismiss){hideAppointment(dismiss.dataset.dismissAppointment);return}
+  if(dismiss){
+    const id=Number(dismiss.dataset.dismissAppointment);
+    if(!confirm('¿Borrar definitivamente esta cita cancelada del historial?'))return;
+    dismiss.disabled=true;
+    api(`/api/public/me/appointments/${id}`,{method:'DELETE'}).then(()=>{showToast('Cita eliminada del historial.','success');loadMyAppointments()}).catch(e=>{showToast(e.message,'error');dismiss.disabled=false});
+    return;
+  }
   const button=event.target.closest('[data-appointment-whatsapp]');
   if(!button)return;
   const row=customerAppointmentRows.find(x=>String(x.id)===String(button.dataset.appointmentWhatsapp));
   if(!row)return;
-  const reason=(prompt('Escribe el motivo que quieres enviar al negocio:','')||'').trim();
-  if(!reason){showToast('Escribe un motivo para enviar el aviso.','error');return}
+  const form=button.closest('form[data-cancel-id]');
+  const reason=(form?.elements?.reason?.value||prompt('Escribe el mensaje que quieres enviar al negocio:','')||'').trim();
+  if(!reason){showToast('Escribe un mensaje para enviar el aviso.','error');return}
   const href=customerAppointmentWhatsappHref(row,reason);
-  if(href)window.open(href,'_blank','noopener');
+  if(href)openAppointmentWhatsApp(href);
 });
 function whatsappDigits(value){
   let digits=String(value||'').replace(/\D/g,'');

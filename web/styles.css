@@ -412,3 +412,4 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 /* Ocultar módulos opcionales vacíos en la vista del cliente */
 #customer-home>#customer-raffles.hidden{display:none!important}
 .appointment-card,.calendar-event{position:relative}.dismiss-appointment{position:absolute;top:8px;right:8px;width:30px;height:30px;padding:0;border:1px solid rgba(255,255,255,.28);border-radius:50%;background:rgba(16,14,26,.72);color:#fff;font-size:20px;line-height:26px;cursor:pointer;z-index:2}.dismiss-appointment:hover{background:#dc2626}.appointment-cancellation-reason{color:#fca5a5}.whatsapp-action.full{display:block;width:100%;text-align:center;margin-top:8px}
+.appointment-date-filters{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:12px 0}.appointment-date-filters label{display:grid;gap:4px;font-size:12px}.appointment-date-filters input{min-width:145px}
