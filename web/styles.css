@@ -675,3 +675,6 @@ body.brand-customer .public-brand-hero .customer-hero-meta{grid-column:2;grid-ro
 body.brand-customer #customer-home>#customer-profile{display:none!important}
 body.brand-customer #customer-profile-tools{z-index:100!important}
 .preview-surface #preview-profile{display:none!important}
+
+/* Build 259: elimina navegación decorativa duplicada del hero; la fila inferior es la navegación funcional */
+body.brand-customer .customer-hero-meta,.preview-surface .customer-hero-meta{display:none!important}
