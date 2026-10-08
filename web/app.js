@@ -799,7 +799,7 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
   });
 })();
 
-/* Build 230: editor visual organizado en secciones desplegables. */
+/* Build 231: editor visual organizado en secciones desplegables. */
 (function initDesignerAccordion(){
   function setup(){
     const form=document.getElementById('branding-form');

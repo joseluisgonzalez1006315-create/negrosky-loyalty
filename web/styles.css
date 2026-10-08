@@ -490,3 +490,10 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 #view-branding .designer-save-bar button{flex:1;min-height:46px}
 @media(max-width:1100px){#view-branding .branding-layout{grid-template-columns:1fr}#view-branding .preview-panel{position:relative;top:auto;max-height:none;overflow:visible;order:-1}}
 @media(max-width:560px){#view-branding .designer-accordion-content{padding:4px 10px 13px}#view-branding .designer-save-bar{bottom:8px}}
+
+/* Build 231 · inicio administrativo renovado */
+.overview-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px;padding:24px 26px;border:1px solid #3a2d62;border-radius:22px;background:radial-gradient(circle at 90% 20%,#7c3aed44,transparent 35%),linear-gradient(120deg,#19132d,#110d1d);box-shadow:0 16px 36px #0003}
+.overview-hero .eyebrow{margin:0 0 5px}.overview-hero h2{margin:0;font-size:clamp(24px,3vw,34px);letter-spacing:-.03em}.overview-hero .muted{margin:6px 0 0}.overview-date{display:flex;align-items:center;gap:9px;padding:12px 15px;border:1px solid #ffffff18;border-radius:13px;background:#ffffff0a;color:#e9ddff;white-space:nowrap}.overview-date span{font-size:20px}.overview-date b{font-size:12px}
+#view-overview .server-status-card{margin-bottom:16px}.server-status-card .panel-title{margin-bottom:4px}
+#view-overview .metrics article{display:flex;flex-direction:column;gap:3px;min-height:112px}.metrics article span:first-child{font-size:12px;text-transform:uppercase;letter-spacing:.08em}.metrics article strong{line-height:1.05}
+@media(max-width:650px){.overview-hero{align-items:flex-start;flex-direction:column;padding:20px}.overview-date{width:100%;justify-content:center}.overview-hero h2{font-size:25px}}
