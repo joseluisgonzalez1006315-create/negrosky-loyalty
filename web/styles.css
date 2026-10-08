@@ -444,7 +444,7 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 
 
 /* BUILD 225 · barra superior del cliente también visible y seleccionable en la vista previa */
-.preview-quick-actions{display:flex;gap:8px;align-items:stretch;overflow-x:auto;margin:0 0 14px;padding:6px;border:1px solid #ffffff25;border-radius:16px;background:#11101add;backdrop-filter:blur(14px);scrollbar-width:none}
+.preview-quick-actions{grid-column:1/-1!important;width:100%!important;min-width:0;box-sizing:border-box;display:flex;flex-wrap:nowrap;gap:8px;align-items:stretch;overflow-x:auto;margin:0 0 14px;padding:6px;border:1px solid #ffffff25;border-radius:16px;background:#11101add;backdrop-filter:blur(14px);scrollbar-width:none}
 .preview-quick-actions::-webkit-scrollbar{display:none}
 .preview-quick-action{flex:0 0 auto;min-width:92px;min-height:44px;padding:8px 10px;border:1px solid #ffffff18;border-radius:11px;background:#ffffff12;color:inherit;font:inherit;font-size:.78rem;font-weight:800;line-height:1.1;cursor:pointer;white-space:normal;text-align:center}
 .preview-quick-action:hover,.preview-quick-action:focus-visible{outline:2px solid var(--purple);outline-offset:1px;background:#ffffff24}
