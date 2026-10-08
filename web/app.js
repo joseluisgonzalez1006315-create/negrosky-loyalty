@@ -468,14 +468,17 @@ applyActiveTenant=function(){applyActiveTenant055();const active=$('active-tenan
 $('active-tenant').onchange=applyActiveTenant;
 
 function applyFeatureVisibility(){
-  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 207';
-  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 207 · GUARDADO DE DISEÑO · 8030';
+  const headerBuild=document.querySelector('#dashboard header .eyebrow');if(headerBuild)headerBuild.textContent='NEGROSKY LOYALTY V3 · BUILD 222';
+  const badge=document.querySelector('.build-badge');if(badge)badge.textContent='BUILD 222 · PANEL COMPLETO · 8030';
   const superAdmin=currentMe?.role==='super_admin';
   const adminPreviewActive=superAdmin&&adminPreviewTenant055===activeTenantId055()&&!!adminPreviewModules055;
   const enabled=new Set(adminPreviewActive?Object.entries(adminPreviewModules055).filter(([,value])=>value).map(([key])=>key):(superAdmin?[]:(currentMe?.enabled_modules||[])));
   const viewFeatures={branding:'public_page',loyalty:'loyalty',appointments:'appointments','time-sales':'time_sales',notifications:'notifications',raffles:'raffles',roulette:'roulette',collaborations:'collaborations'};
   Object.entries(viewFeatures).forEach(([view,key])=>{
-    const visible=superAdmin?adminPreviewActive&&enabled.has(key):enabled.has(key);
+    // El administrador general debe poder ver y revisar todos los módulos
+    // aunque el negocio activo todavía no tenga alguno habilitado. Los
+    // permisos del negocio siguen aplicándose a dueños y trabajadores.
+    const visible=superAdmin?true:enabled.has(key);
     document.querySelectorAll(`[data-view="${view}"]`).forEach(el=>el.classList.toggle('hidden',!visible));
     document.querySelectorAll(`#view-${view}`).forEach(el=>el.classList.toggle('hidden',!visible));
   });
