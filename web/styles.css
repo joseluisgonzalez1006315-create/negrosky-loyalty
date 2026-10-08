@@ -529,5 +529,5 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 @media(max-width:900px){.dashboard .overview-hero{padding:22px}.dashboard .quick-access-grid button{min-height:78px}}
 
 
-/* Build 237 · navegación con acceso claro a todos los módulos */
+/* Build 238 · navegación con acceso claro a todos los módulos */
 @media(min-width:1101px){.dashboard>.tabs{gap:3px!important;padding:14px 10px!important}.dashboard>.tabs .nav-group-label{margin:9px 8px 3px!important;padding:4px 7px!important;font-size:9px!important;letter-spacing:.13em}.dashboard>.tabs button{min-height:39px!important;padding:8px 10px!important;font-size:12.5px!important}.dashboard>.tabs button[data-view="analytics"]{border-color:#6d4eb155;background:linear-gradient(100deg,#4c1d9555,#11101c);color:#e9d5ff}.dashboard>.tabs button[data-view="analytics"]:before{content:'📊'}}
