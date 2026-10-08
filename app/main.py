@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.242")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.244")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -921,6 +921,7 @@ def sync_module_defaults():
             con.execute("SAVEPOINT negrosky_module_sync")
             try:
                 initialize_tenant_modules(con, tenant_id)
+                repair_empty_module_state(con, tenant_id)
                 onboarding = con.execute(
                     "SELECT 1 FROM tenant_onboarding WHERE tenant_id=? LIMIT 1",
                     (tenant_id,),
@@ -946,6 +947,45 @@ def sync_module_defaults():
 
 def effective_modules(con, tenant_id: int, branch_id: int | None = None):
     return {key: module_enabled(con, tenant_id, key, branch_id) for key in MODULE_KEYS}
+
+
+def repair_empty_module_state(con, tenant_id: int) -> bool:
+    """Recover a legacy all-false module row set without touching real choices.
+
+    Some older deployments created the feature_modules rows with every flag
+    disabled while the business already had loyalty, raffle, appointment or
+    branding data.  In that case the admin panel shows an empty configuration
+    and the public client hides existing features.  We only repair the state
+    when every tenant-level flag is false and there is evidence of a module in
+    the tenant's data; an intentional partial configuration is left alone.
+    """
+    rows = con.execute(
+        "SELECT module_key, enabled FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL",
+        (tenant_id,),
+    ).fetchall()
+    if not rows or any(bool(row["enabled"]) for row in rows):
+        return False
+    evidence = {
+        "loyalty": con.execute("SELECT 1 FROM loyalty_programs WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "raffles": con.execute("SELECT 1 FROM raffles WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "roulette": con.execute("SELECT 1 FROM roulette_configs WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "appointments": con.execute("SELECT 1 FROM appointment_services WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "time_sales": con.execute("SELECT 1 FROM time_services WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "notifications": con.execute("SELECT 1 FROM notifications WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "public_page": con.execute("SELECT 1 FROM business_branding WHERE tenant_id=? LIMIT 1", (tenant_id,)).fetchone(),
+        "collaborations": con.execute("SELECT 1 FROM collaborations WHERE requester_tenant_id=? OR partner_tenant_id=? LIMIT 1", (tenant_id, tenant_id)).fetchone(),
+    }
+    values = {key: bool(evidence.get(key)) for key in MODULE_KEYS}
+    values["loyalty"] = True
+    values["public_page"] = True
+    if not any(values.values()):
+        return False
+    con.execute("DELETE FROM feature_modules WHERE tenant_id=? AND branch_id IS NULL", (tenant_id,))
+    con.executemany(
+        "INSERT INTO feature_modules (tenant_id, branch_id, module_key, enabled) VALUES (?, NULL, ?, ?)",
+        [(tenant_id, key, int(values[key])) for key in MODULE_KEYS],
+    )
+    return True
 DEFAULT_HOURS = [
     {"weekday": day, "enabled": True, "opens_at": "00:00", "closes_at": "23:59"}
     for day in range(7)
@@ -1312,7 +1352,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.242", "build": "242", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.244", "build": "243", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -2237,8 +2277,12 @@ def get_tenant_modules(tenant_id: int, branch_id: int | None = None,
             branch = con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=?", (branch_id, scope)).fetchone()
             if not branch:
                 raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+        repaired = False
+        if branch_id is None:
+            repaired = repair_empty_module_state(con, scope)
         return {"tenant_id": scope, "branch_id": branch_id,
-                "modules": effective_modules(con, scope, branch_id)}
+                "modules": effective_modules(con, scope, branch_id),
+                "repaired": repaired}
 
 
 @app.put("/api/tenant-modules")
@@ -5070,7 +5114,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.242",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.244",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}

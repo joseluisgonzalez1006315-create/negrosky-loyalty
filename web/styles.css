@@ -532,10 +532,10 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 /* Build 238 · navegación con acceso claro a todos los módulos */
 @media(min-width:1101px){.dashboard>.tabs{gap:3px!important;padding:14px 10px!important}.dashboard>.tabs .nav-group-label{margin:9px 8px 3px!important;padding:4px 7px!important;font-size:9px!important;letter-spacing:.13em}.dashboard>.tabs button{min-height:39px!important;padding:8px 10px!important;font-size:12.5px!important}}
 
-/* BUILD 242 ANALYTICS */
+/* BUILD 243 ANALYTICS */
 .analytics-layout{align-items:start}.analytics-panel{min-width:0}.analytics-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.analytics-controls label{display:grid;gap:7px;color:var(--muted);font-size:12px;font-weight:800}.analytics-status{min-height:42px;display:flex;align-items:center;margin:12px 0 16px}.analytics-status.loading{color:#d8c8ff;background:#241a43}.analytics-status.error{color:#fecaca;background:#451a24}.analytics-metrics{grid-template-columns:repeat(5,minmax(0,1fr));margin:0 0 24px}.analytics-metrics article{min-width:0}.analytics-metrics article span{display:block;white-space:normal}.analytics-placeholder{padding:18px;border:1px dashed #4b3b70;border-radius:14px;color:var(--muted);text-align:center}.analytics-panel table{width:100%;display:table;overflow:visible;white-space:normal}.analytics-panel .panel-title button{min-width:132px}@media(max-width:900px){.analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:560px){.analytics-controls{grid-template-columns:1fr}.analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-panel table{display:block;overflow-x:auto;white-space:nowrap}.analytics-panel .panel-title button{width:100%}}
 
-/* BUILD 242 ANALYTICS NAV OVERRIDE */
+/* BUILD 243 ANALYTICS NAV OVERRIDE */
 .dashboard>.tabs button[data-view="analytics"]:not(.active){border-color:transparent!important;background:transparent!important;color:#bdb2d0!important;box-shadow:none!important}
 .dashboard>.tabs button[data-view="analytics"]:not(.active)::before{content:none!important;display:none!important}
 .dashboard>.tabs button[data-view="analytics"].active{border-color:transparent!important}
