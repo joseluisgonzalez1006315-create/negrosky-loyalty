@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.248")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.249")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -1044,6 +1044,17 @@ def require_service_open(con, tenant_id, branch_id=None):
     return current
 
 
+def module_flag(value, default: bool = False) -> bool:
+    """Normalize booleans returned by old SQLite/PostgreSQL schemas."""
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "on", "active", "activo"}
+
+
 def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None = None) -> bool:
     enabled = DEFAULT_MODULES.get(module_key, False)
     tenant_value = con.execute(
@@ -1051,7 +1062,7 @@ def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None =
         (tenant_id, module_key),
     ).fetchone()
     if tenant_value is not None:
-        enabled = bool(tenant_value["enabled"])
+        enabled = module_flag(tenant_value["enabled"], enabled)
         if not enabled:
             return False
     if branch_id is not None:
@@ -1060,7 +1071,7 @@ def module_enabled(con, tenant_id: int, module_key: str, branch_id: int | None =
             (tenant_id, branch_id, module_key),
         ).fetchone()
         if branch_value is not None:
-            enabled = bool(branch_value["enabled"])
+            enabled = module_flag(branch_value["enabled"], enabled)
     return enabled
 
 
@@ -1334,7 +1345,7 @@ def usable_lan_address(value: str) -> bool:
 
 @app.get("/api/health")
 def health():
-    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.248", "build": "248", "port": 8030, "stable_url": True, "status": "ok"}
+    return {"system": "NEGROSKY LOYALTY V3", "version": "3.0.249", "build": "249", "port": 8030, "stable_url": True, "status": "ok"}
 
 
 @app.head("/api/health", include_in_schema=False)
@@ -5095,7 +5106,7 @@ def diagnostics(user=Depends(require("super_admin"))):
         stats = {table: con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                  for table in ("tenants", "branches", "users", "customers", "purchases", "rewards", "appointments", "notifications")}
     usage = shutil.disk_usage(ROOT)
-    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.248",
+    return {"status": "ok" if integrity == "ok" else "error", "version": "3.0.249",
             "database_integrity": integrity, "database_size": db_path.stat().st_size if db_path.exists() else 0,
             "free_disk_bytes": usage.free, "backups": len(list(BACKUPS.glob("negrosky_*.db"))), "records": stats,
             "error_log_exists": (ROOT / "servidor_error.log").exists()}
