@@ -46,7 +46,7 @@ WEB = ROOT / "web"
 ALLOWED_ROLES = {"super_admin", "business_admin", "branch_admin", "worker"}
 ANALYTICS_RETENTION_DAYS = 90
 
-app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.219")
+app = FastAPI(title="NEGROSKY LOYALTY V3", version="3.0.220")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
@@ -3969,10 +3969,16 @@ def book_appointment(data: AppointmentBookingInput, customer=Depends(current_cus
             raise HTTPException(status_code=409, detail="La cita debe programarse con al menos 10 minutos de anticipación")
         if not appointment_fits_hours(con, customer["tenant_id"], data.branch_id, starts, ends):
             raise HTTPException(status_code=409, detail="La hora seleccionada está fuera del horario de atención")
+        # En PostgreSQL dos clientes pueden enviar la misma reserva al mismo
+        # tiempo. Bloquear la sucursal durante esta transacción evita que ambos
+        # pasen la comprobación de disponibilidad antes de insertar.
+        if using_postgres():
+            con.execute("SELECT id FROM branches WHERE id=? AND tenant_id=? FOR UPDATE",
+                        (data.branch_id, customer["tenant_id"])).fetchone()
         overlap = con.execute(
-            """SELECT 1 FROM appointments WHERE branch_id=? AND status IN ('scheduled','confirmed')
+            """SELECT 1 FROM appointments WHERE tenant_id=? AND branch_id=? AND status IN ('scheduled','confirmed')
             AND starts_at < ? AND COALESCE(estimated_end_at,ends_at) > ? LIMIT 1""",
-            (data.branch_id, ends.isoformat(), starts.isoformat()),
+            (customer["tenant_id"], data.branch_id, ends.isoformat(), starts.isoformat()),
         ).fetchone()
         if overlap:
             raise HTTPException(status_code=409, detail="Ese horario ya está ocupado. Elige otra hora.")
