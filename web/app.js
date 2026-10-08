@@ -799,7 +799,7 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
   });
 })();
 
-/* Build 231: editor visual organizado en secciones desplegables. */
+/* Build 232: editor visual organizado en secciones desplegables. */
 (function initDesignerAccordion(){
   function setup(){
     const form=document.getElementById('branding-form');
@@ -830,6 +830,28 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
     const actions=form.querySelector('.branding-actions');
     if(actions && !actions.classList.contains('designer-save-bar')) actions.classList.add('designer-save-bar');
     form.dataset.accordionReady='1';
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup,{once:true}); else setup();
+})();
+/* Build 232: grupos visuales del menú lateral. */
+(function initNavGroups(){
+  function setup(){
+    const nav=document.querySelector('.dashboard>.tabs');
+    if(!nav || nav.dataset.grouped==='1') return;
+    const groups={
+      overview:'INICIO',business:'GESTIÓN',branding:'GESTIÓN',branches:'GESTIÓN',service:'OPERACIÓN',modules:'OPERACIÓN',
+      loyalty:'OPERACIÓN',appointments:'OPERACIÓN','time-sales':'OPERACIÓN',raffles:'OPERACIÓN',roulette:'OPERACIÓN',
+      customers:'CLIENTES',history:'CLIENTES',notifications:'COMUNICACIÓN',collaborations:'COMUNICACIÓN',users:'SISTEMA',security:'SISTEMA',system:'SISTEMA'
+    };
+    let current='';
+    [...nav.querySelectorAll('button[data-view]')].forEach(btn=>{
+      const group=groups[btn.dataset.view]||'OTROS';
+      if(group!==current){
+        const label=document.createElement('span'); label.className='nav-group-label'; label.textContent=group; label.setAttribute('aria-hidden','true');
+        nav.insertBefore(label,btn); current=group;
+      }
+    });
+    nav.dataset.grouped='1';
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup,{once:true}); else setup();
 })();

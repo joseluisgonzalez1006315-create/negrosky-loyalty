@@ -497,3 +497,10 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 #view-overview .server-status-card{margin-bottom:16px}.server-status-card .panel-title{margin-bottom:4px}
 #view-overview .metrics article{display:flex;flex-direction:column;gap:3px;min-height:112px}.metrics article span:first-child{font-size:12px;text-transform:uppercase;letter-spacing:.08em}.metrics article strong{line-height:1.05}
 @media(max-width:650px){.overview-hero{align-items:flex-start;flex-direction:column;padding:20px}.overview-date{width:100%;justify-content:center}.overview-hero h2{font-size:25px}}
+/* Build 232 · navegación lateral agrupada */
+.dashboard>.tabs{padding:14px 10px;gap:5px}
+.dashboard>.tabs .nav-group-label{display:block;margin:13px 9px 4px;color:#8276a6;font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;pointer-events:none}
+.dashboard>.tabs .nav-group-label:first-child{margin-top:3px}
+.dashboard>.tabs button{position:relative;display:flex;align-items:center;gap:8px}
+.dashboard>.tabs button.active:before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:4px;background:#d7b9ff}
+@media(max-width:1100px){.dashboard>.tabs .nav-group-label{display:none}.dashboard>.tabs button.active:before{display:none}}
