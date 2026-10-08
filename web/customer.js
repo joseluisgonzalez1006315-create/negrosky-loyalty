@@ -316,7 +316,7 @@ function customerAppointmentWhatsappHref(row,reason){
   if(!phone)return '';
   const when=ES.dateTime(row.starts_at,row.tenant_timezone);
   const message=`Hola ${row.tenant_name||'equipo del negocio'} 👋\n\nSoy ${customerAppointmentCustomerName||'el cliente'} y quiero comunicarme con ustedes sobre mi cita.\n\n💬 Mensaje: ${reason||'Quiero comunicarme sobre mi cita.'}\n\n📍 Sucursal: ${row.branch_name||''}\n📅 Fecha y hora: ${when}\n💇 Servicio: ${row.service_name||''}`;
-  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(message)}`;
 }
 function openAppointmentWhatsApp(href){
   if(!href)return;
@@ -326,7 +326,7 @@ function openAppointmentWhatsApp(href){
     const url=new URL(href),phone=url.searchParams.get('phone')||'',text=url.searchParams.get('text')||'';
     const appUrl=`whatsapp://send?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}`;
     window.location.href=appUrl;
-    setTimeout(()=>{if(document.visibilityState==='visible')window.location.href=href},900);
+    setTimeout(()=>{if(document.visibilityState==='visible')window.location.href=href},1800);
   }catch(_){window.location.href=href}
 }
 async function loadMyAppointments(){
@@ -366,7 +366,9 @@ $('customer-appointments').addEventListener('click',event=>{
 });
 function whatsappDigits(value){
   let digits=String(value||'').replace(/\D/g,'');
-  if(digits.length===10&&digits.startsWith('3'))digits='57'+digits;
+  if(digits.startsWith('00'))digits=digits.slice(2);
+  if(digits.length===11&&digits.startsWith('0'))digits=digits.slice(1);
+  if(digits.length===10)digits='57'+digits;
   return digits;
 }
 function updateCustomerAppointmentWhatsApp(){
