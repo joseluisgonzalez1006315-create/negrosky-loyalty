@@ -3,7 +3,7 @@ let token=localStorage.getItem('worker_token');
 let preview=null;
 let workerModules={loyalty:true,appointments:true,time_sales:true,notifications:true,public_page:true,raffles:true,roulette:true};
 let workerPermissionBusy=false;
-const workerAudio=new Audio('/static/success.wav?v=254');
+const workerAudio=new Audio('/static/success.wav?v=255');
 workerAudio.preload='auto';workerAudio.setAttribute('playsinline','');
 let workerSoundUnlocked=false;
 const queryCode=new URLSearchParams(location.search).get('code');
