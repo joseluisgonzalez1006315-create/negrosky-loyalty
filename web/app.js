@@ -798,3 +798,38 @@ document.querySelectorAll('.build-badge').forEach(el=>el.textContent='BUILD 227 
     if(theme){applyThemeValues(theme);updateBrandingPreview();$('branding-message').textContent=`Tema “${themeLabels[select.value]||select.value}” preparado. Pulsa Guardar diseño para publicarlo.`}
   });
 })();
+
+/* Build 230: editor visual organizado en secciones desplegables. */
+(function initDesignerAccordion(){
+  function setup(){
+    const form=document.getElementById('branding-form');
+    if(!form || form.dataset.accordionReady==='1') return;
+    const headings=[...form.querySelectorAll(':scope > .designer-section-heading')];
+    if(!headings.length) return;
+    headings.forEach((heading,index)=>{
+      const box=document.createElement('details');
+      box.className='designer-accordion';
+      box.open=index===0;
+      const summary=document.createElement('summary');
+      const copy=heading.cloneNode(true);
+      summary.appendChild(copy);
+      const content=document.createElement('div');
+      content.className='designer-accordion-content';
+      let node=heading.nextSibling;
+      while(node){
+        const next=node.nextSibling;
+        if(node.nodeType===1 && node.classList.contains('designer-section-heading')) break;
+        if(node.nodeType===1 && (node.classList.contains('branding-actions') || node.id==='branding-reset')) break;
+        content.appendChild(node);
+        node=next;
+      }
+      box.append(summary,content);
+      form.insertBefore(box,heading);
+      heading.remove();
+    });
+    const actions=form.querySelector('.branding-actions');
+    if(actions && !actions.classList.contains('designer-save-bar')) actions.classList.add('designer-save-bar');
+    form.dataset.accordionReady='1';
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',setup,{once:true}); else setup();
+})();

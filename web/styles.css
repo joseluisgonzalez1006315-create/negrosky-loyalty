@@ -473,3 +473,20 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 #view-branding .preview-panel{margin:0;max-height:calc(100vh - 32px);overflow:auto}
 #view-branding .preview-panel>.branding-preview{margin-bottom:0}
 @media(max-width:900px){#view-branding .preview-panel{max-height:none;overflow:visible}}
+/* Build 230 · rediseño del editor con acordeones y vista previa fija */
+#view-branding .branding-layout{grid-template-columns:minmax(390px,.95fr) minmax(520px,1.25fr);align-items:start}
+#view-branding #branding-form{gap:10px}
+#view-branding .designer-accordion{margin:0 0 10px;border:1px solid #34285f;border-radius:16px;background:linear-gradient(145deg,#161226,#100e19);overflow:hidden}
+#view-branding .designer-accordion>summary{list-style:none;cursor:pointer;padding:0}
+#view-branding .designer-accordion>summary::-webkit-details-marker{display:none}
+#view-branding .designer-accordion>summary .designer-section-heading{margin:0;border:0;border-radius:0;background:transparent;padding:13px 14px}
+#view-branding .designer-accordion>summary .designer-section-heading:after{content:'＋';margin-left:auto;color:#bda5ff;font-size:20px;line-height:1}
+#view-branding .designer-accordion[open]>summary .designer-section-heading:after{content:'−'}
+#view-branding .designer-accordion-content{padding:4px 14px 16px;border-top:1px solid #34285f33;display:grid;gap:10px}
+#view-branding .designer-accordion-content>.designer-section-heading{display:none}
+#view-branding .preview-panel{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;scrollbar-width:thin}
+#view-branding .preview-panel>.branding-preview{min-height:0}
+#view-branding .designer-save-bar{position:sticky;bottom:12px;z-index:20;display:flex;gap:10px;padding:10px;border:1px solid #8b5cf6;border-radius:16px;background:#121021ee;backdrop-filter:blur(14px);box-shadow:0 14px 38px #0008}
+#view-branding .designer-save-bar button{flex:1;min-height:46px}
+@media(max-width:1100px){#view-branding .branding-layout{grid-template-columns:1fr}#view-branding .preview-panel{position:relative;top:auto;max-height:none;overflow:visible;order:-1}}
+@media(max-width:560px){#view-branding .designer-accordion-content{padding:4px 10px 13px}#view-branding .designer-save-bar{bottom:8px}}
