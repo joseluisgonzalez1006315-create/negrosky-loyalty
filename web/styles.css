@@ -557,3 +557,25 @@ body.brand-customer .public-brand-hero .muted{grid-column:2;margin:2px 0 0!impor
 @media(max-width:700px){#view-branding .designer-intro::after{position:static;display:inline-flex;width:max-content;margin-top:8px}#view-branding .designer-intro small{max-width:100%}}
 @media(max-width:560px){#view-branding .preview-zoom-actions{align-items:stretch}#view-branding .preview-zoom-actions label{min-width:100%;display:grid;grid-template-columns:auto 1fr auto;align-items:center}#view-branding .designer-save-bar{padding:8px;gap:7px}}
 @media(prefers-reduced-motion:reduce){#view-branding .designer-accordion{transition:none}}
+
+/* BUILD 252 · experiencia visual de la página del cliente */
+body.brand-customer .mobile-shell{position:relative}
+body.brand-customer #customer-home{gap:16px}
+body.brand-customer #customer-home>div:empty,body.brand-customer #customer-home>section:empty{display:none!important}
+body.brand-customer #customer-home>#cards,body.brand-customer #customer-home>#rewards{display:grid;gap:14px;min-width:0}
+body.brand-customer #customer-home>#cards:empty,body.brand-customer #customer-home>#rewards:empty,body.brand-customer #customer-home>#customer-raffles:empty{display:none!important}
+body.brand-customer #customer-home .loyalty-card{position:relative;overflow:hidden;border-color:#ffffff25;box-shadow:0 10px 26px #0003;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+body.brand-customer #customer-home .loyalty-card::before{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,var(--brand-progress-start,var(--purple)),var(--brand-progress-end,var(--purple2)));opacity:.9}
+body.brand-customer #customer-home .loyalty-card:hover{transform:translateY(-2px);border-color:var(--purple);box-shadow:0 16px 32px #0004}
+body.brand-customer .customer-quick-actions{border-color:#ffffff35!important;background:#0e0c18e8!important;box-shadow:0 10px 26px #0005!important}
+body.brand-customer .customer-quick-actions button,body.brand-customer .customer-quick-actions a{border-color:#ffffff1c!important;transition:transform .16s ease,background .16s ease,border-color .16s ease}
+body.brand-customer .customer-quick-actions button:hover,body.brand-customer .customer-quick-actions a:hover{transform:translateY(-1px);border-color:#c4b5fd!important;background:#ffffff1d!important}
+body.brand-customer .customer-quick-actions button[data-scroll-target="cards"]{background:linear-gradient(135deg,var(--purple),var(--purple2))!important;border-color:#d8c5ff!important}
+body.brand-customer #customer-schedule.schedule-panel .schedule-content,body.brand-customer #appointment-box,body.brand-customer #customer-raffles{border-color:#ffffff25;box-shadow:0 10px 26px #0003}
+body.brand-customer #appointment-box h2,body.brand-customer #customer-raffles h2,body.brand-customer #customer-schedule h3{letter-spacing:-.02em}
+body.brand-customer .reward-availability{border-color:#a970ff66;background:#6d28d933}
+body.brand-customer .customer-loading-card{border:1px solid #ffffff14;box-shadow:0 8px 22px #0002}
+body.brand-customer .no-campaigns{border-color:#a970ff88;box-shadow:0 10px 26px #0003}
+@media(max-width:899px){body.brand-customer #customer-home{gap:11px}body.brand-customer #customer-home .loyalty-card{box-shadow:0 8px 20px #0003}body.brand-customer #customer-home .loyalty-card:hover{transform:none}}
+@media(max-width:520px){body.brand-customer #customer-home>#cards,body.brand-customer #customer-home>#rewards{gap:10px}body.brand-customer #customer-home .loyalty-card{border-radius:18px;padding:16px!important}body.brand-customer #customer-home .loyalty-card::before{height:2px}body.brand-customer #customer-home .loyalty-card button{min-height:44px}}
+@media(prefers-reduced-motion:reduce){body.brand-customer #customer-home .loyalty-card,body.brand-customer .customer-quick-actions button,body.brand-customer .customer-quick-actions a{transition:none}}
