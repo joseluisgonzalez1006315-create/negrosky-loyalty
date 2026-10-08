@@ -706,27 +706,3 @@ body.brand-customer .customer-hero-meta,.preview-surface .customer-hero-meta{dis
  body.brand-customer #customer-home>#cards .loyalty-card{box-shadow:0 18px 40px #0006!important}
  body.brand-customer #customer-quick-actions{order:-1!important}
 }
-
-/* Build 263: dashboard real conservando fichas llenas y vacías */
-@media(max-width:899px){
- body.brand-customer{padding-bottom:18px!important}
- body.brand-customer #customer-home{display:flex!important;flex-direction:column!important;gap:12px!important}
- body.brand-customer #customer-home::before{order:0!important;margin:0!important;padding:4px 5px 0!important;font-size:1.08rem!important}
- body.brand-customer #customer-home>#cards{order:1!important}
- body.brand-customer #customer-quick-actions{order:2!important;position:static!important;left:auto!important;right:auto!important;bottom:auto!important;top:auto!important;width:100%!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:9px!important;padding:0!important;margin:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important;backdrop-filter:none!important;overflow:visible!important}
- body.brand-customer #customer-quick-actions button,body.brand-customer #customer-quick-actions a{width:auto!important;min-width:0!important;height:64px!important;min-height:64px!important;flex:initial!important;padding:10px 8px!important;border-radius:16px!important;font-size:.76rem!important;line-height:1.1!important;box-shadow:0 8px 20px #0006!important;border:1px solid #ffffff22!important}
- body.brand-customer #customer-quick-actions a:first-child{background:linear-gradient(135deg,#10b981,#047857)!important}
- body.brand-customer #customer-quick-actions button:nth-child(2){background:linear-gradient(135deg,#26c6b5,#0f766e)!important}
- body.brand-customer #customer-quick-actions button:nth-child(3){background:linear-gradient(135deg,#a855f7,#4c1d95)!important}
- body.brand-customer #customer-quick-actions button:nth-child(4){background:linear-gradient(135deg,#2563eb,#172554)!important}
- body.brand-customer #customer-quick-actions button:nth-child(5){grid-column:1/-1;background:linear-gradient(135deg,#ec4899,#831843)!important}
- body.brand-customer #customer-home>#rewards,body.brand-customer #customer-home>#customer-raffles,body.brand-customer #customer-home>#appointment-box{order:3!important}
- body.brand-customer #customer-home>#cards .loyalty-card{padding:16px!important;border-radius:22px!important;background:linear-gradient(145deg,#111c26,#161322)!important}
- body.brand-customer #customer-home>#cards .stamp-track{display:flex!important;justify-content:space-between!important;align-items:center!important;gap:7px!important;margin:14px 0!important}
- body.brand-customer #customer-home>#cards .stamp{flex:0 0 40px!important;width:40px!important;height:40px!important;opacity:1!important;filter:none!important}
- body.brand-customer #customer-home>#cards .stamp:not(.done){background:#202b35!important;border:1px solid #ffffff20!important;color:#cbd5e1!important;opacity:.8!important}
- body.brand-customer #customer-home>#cards .stamp.done{box-shadow:0 0 14px color-mix(in srgb,var(--purple2) 55%,transparent)!important}
- body.brand-customer #customer-home>#cards .progress{height:12px!important;border-radius:999px!important}
- body.brand-customer #customer-home>#cards .progress-percent{font-size:14px!important;padding:7px 10px!important;border-radius:999px!important}
-}
-@media(max-width:520px){body.brand-customer #customer-quick-actions button,body.brand-customer #customer-quick-actions a{height:60px!important;min-height:60px!important;font-size:.7rem!important}body.brand-customer #customer-home>#cards .stamp{flex-basis:36px!important;width:36px!important;height:36px!important}}
