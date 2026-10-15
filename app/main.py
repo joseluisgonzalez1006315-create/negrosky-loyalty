@@ -1925,7 +1925,9 @@ def _save_branding_fields(con, tenant_id: int, fields: dict):
             SELECT column_name FROM information_schema.columns
             WHERE table_schema='public' AND table_name='business_branding'
         """).fetchall()
-        available = {row[0] for row in rows}
+        # _CompatRow supports both numeric and named access.  Keep this
+        # defensive because older pool/driver versions may return mappings.
+        available = {row[0] if not isinstance(row, dict) else row.get("column_name") for row in rows}
     else:
         available = {row[1] for row in con.execute("PRAGMA table_info(business_branding)")}
     if "tenant_id" not in available:
@@ -1946,6 +1948,8 @@ def _save_branding_fields(con, tenant_id: int, fields: dict):
     else:
         columns = list(clean.keys())
         values = list(clean.values())
+        if not columns:
+            raise HTTPException(status_code=500, detail="La tabla business_branding no tiene columnas compatibles para guardar")
         if "updated_at" in available:
             columns.append("updated_at")
             values.append(None)
@@ -1974,9 +1978,14 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
     init_db()
     scope = tenant_scope(user, tenant_id)
     with connection() as con:
-        if not con.execute("SELECT 1 FROM tenants WHERE id=? AND deleted_at IS NULL", (scope,)).fetchone():
+        # Some existing Supabase databases predate the soft-delete migration
+        # and do not have tenants.deleted_at.  Checking only the primary key
+        # keeps the branding editor usable on both schemas; the tenant scope
+        # is already enforced by tenant_scope().
+        if not con.execute("SELECT 1 FROM tenants WHERE id=?", (scope,)).fetchone():
             raise HTTPException(status_code=404, detail="Negocio no encontrado")
-        _save_branding_fields(con, scope, {
+        try:
+            _save_branding_fields(con, scope, {
             "theme_key": data.theme_key, "display_name": data.display_name.strip() if data.display_name else None,
             "welcome_text": data.welcome_text.strip(), "primary_color": data.primary_color.lower(),
             "secondary_color": data.secondary_color.lower(), "button_color": data.button_color.lower(),
@@ -2005,7 +2014,13 @@ def update_branding(data: BrandingInput, tenant_id: int | None = None,
             "show_social_mobile": int(data.show_social_mobile), "show_social_desktop": int(data.show_social_desktop),
             "module_order_mobile": data.module_order_mobile, "module_order_desktop": data.module_order_desktop,
             "module_widths_mobile": data.module_widths_mobile, "module_widths_desktop": data.module_widths_desktop,
-        })
+            })
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Return the real database reason instead of the unhelpful generic
+            # frontend fallback, making any remaining schema issue diagnosable.
+            raise HTTPException(status_code=500, detail=f"No se pudo guardar el diseño en la base de datos: {exc}") from exc
         # El historial se registra por separado. Una tabla audit_logs antigua
         # nunca debe impedir guardar el diseño.
         return branding_payload(con, scope)
