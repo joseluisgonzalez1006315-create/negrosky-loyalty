@@ -576,6 +576,53 @@ def ensure_platform_settings_table():
         )""")
 
 
+def ensure_push_tables():
+    """Ensure Web Push storage exists in the cloud database too.
+
+    The original schema created these tables only in SQLite. Render uses
+    PostgreSQL, so without this idempotent migration the public push endpoint
+    could not return a VAPID key and every mobile browser reported push as
+    unavailable.
+    """
+    if not using_postgres():
+        return
+    with connection() as con:
+        con.execute("""CREATE TABLE IF NOT EXISTS push_keys (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            private_key_pem TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id BIGSERIAL PRIMARY KEY,
+            customer_id BIGINT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+            tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ
+        )""")
+        if not con.execute("SELECT 1 FROM push_keys WHERE id=1").fetchone():
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+            private_key = ec.generate_private_key(ec.SECP256R1())
+            private_pem = private_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ).decode()
+            public_raw = private_key.public_key().public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint,
+            )
+            public_key = base64.urlsafe_b64encode(public_raw).rstrip(b"=").decode()
+            con.execute(
+                "INSERT INTO push_keys(id,private_key_pem,public_key) VALUES(1,?,?)",
+                (private_pem, public_key),
+            )
+
+
 def landing_contact_values(con):
     rows=con.execute("SELECT key,value FROM platform_settings WHERE key IN ('landing_whatsapp','landing_facebook','landing_tiktok')").fetchall()
     values={row["key"]: row["value"] for row in rows}
@@ -663,6 +710,7 @@ def startup():
     init_db()
     ensure_customer_trash_column()
     ensure_platform_settings_table()
+    ensure_push_tables()
     ensure_raffle_winner_photo_column()
     sync_module_defaults()
     ensure_general_business_purchases()
