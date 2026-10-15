@@ -4630,13 +4630,9 @@ def public_collaborations(slug: str):
 
 @app.get("/api/public/{slug}/platform-ads")
 def public_platform_ads(slug: str):
-    # La respuesta contiene flyers en base64; reutilizarla durante 60 s evita
-    # que cada recarga vuelva a transferir las mismas imágenes desde Supabase.
-    cache_key = str(slug).strip().lower()
-    cached = _PUBLIC_AD_CACHE.get(cache_key)
-    now_mono = time.monotonic()
-    if cached and now_mono - cached[0] < _PUBLIC_AD_CACHE_TTL:
-        return cached[1]
+    # La publicidad debe reflejarse inmediatamente después de crearla,
+    # activarla o desactivarla. No usar caché aquí: una respuesta antigua
+    # hacía que el anuncio apareciera tarde o pareciera no existir.
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     with connection() as con:
         tenant = con.execute("SELECT id FROM tenants WHERE slug=? AND status='active' AND deleted_at IS NULL", (slug,)).fetchone()
@@ -4660,7 +4656,6 @@ def public_platform_ads(slug: str):
             AND (ends_at IS NULL OR ends_at>=?)
             ORDER BY created_at DESC,id DESC""", (tenant["id"], now, now)).fetchall()
         result.extend([{**row_dict(row), "source": "business"} for row in business_rows])
-    _PUBLIC_AD_CACHE[cache_key] = (now_mono, result)
     return result
 
 
