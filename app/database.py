@@ -132,9 +132,25 @@ class _PostgresConnection:
         raw = self._raw.execute(sql, params)
         cursor = _CompatCursor(raw, self)
         if re.match(r"\s*INSERT\s+INTO\b", sql, re.I) and " RETURNING " not in sql.upper():
+            # `lastval()` is only defined after an INSERT that used a
+            # sequence. Branding rows use an explicit tenant_id and may not
+            # advance any sequence. PostgreSQL marks the whole transaction as
+            # aborted when that optional lookup fails, so isolate it in a
+            # savepoint and roll back only the lookup on failure.
+            savepoint = "negrosky_lastrowid"
             try:
+                self._raw.execute(f"SAVEPOINT {savepoint}")
                 cursor._lastrowid = self._raw.execute("SELECT lastval()").fetchone()[0]
+                self._raw.execute(f"RELEASE SAVEPOINT {savepoint}")
             except Exception:
+                try:
+                    self._raw.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    self._raw.execute(f"RELEASE SAVEPOINT {savepoint}")
+                except Exception:
+                    # Preserve the original INSERT result. The savepoint is
+                    # an optimization for compatibility, never a requirement
+                    # for a successful write.
+                    pass
                 cursor._lastrowid = None
         return cursor
 
