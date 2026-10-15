@@ -4649,12 +4649,11 @@ def public_platform_ads(slug: str):
             ORDER BY created_at DESC,id DESC""", (now, now)).fetchall()
         result = []
         for row in rows:
-            try:
-                targets = json.loads(row["target_tenants_json"] or "[]")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                targets = []
-            if not targets or tenant["id"] in targets:
-                result.append(row_dict(row))
+            # La publicidad institucional de NEGROSKY es obligatoria y
+            # transversal: nunca se filtra por negocio. Los registros viejos
+            # que tenían destinatarios específicos también pasan a mostrarse
+            # en todos los negocios.
+            result.append(row_dict(row))
         business_rows = con.execute("""SELECT id,title,message,image_url,target_url,target_label,starts_at,ends_at,ad_seconds
             FROM business_ads WHERE tenant_id=? AND is_active=1
             AND (starts_at IS NULL OR starts_at<=?)
