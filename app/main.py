@@ -1215,13 +1215,31 @@ def customer_directory_page():
 def public_business_directory():
     init_db()
     with connection() as con:
-        tenants = con.execute("SELECT id,name,slug FROM tenants WHERE status='active' AND deleted_at IS NULL ORDER BY LOWER(name)").fetchall()
-        result = []
-        for tenant in tenants:
-            if not module_enabled(con, tenant["id"], "public_page"):
-                continue
-            brand = branding_payload(con, tenant["id"])
-            result.append({"name": brand.get("display_name") or tenant["name"], "slug": tenant["slug"], "logo_url": brand.get("logo_url"), "welcome_text": brand.get("welcome_text")})
+        # Load the directory in one query. Calling branding_payload() once per
+        # business caused a chain of queries and made the list appear slowly
+        # as the number of businesses grew.
+        tenants = con.execute("""
+            SELECT t.id, t.name, t.slug,
+                   b.display_name, b.welcome_text, b.logo_mime,
+                   COALESCE(f.enabled, 1) AS public_page_enabled
+            FROM tenants t
+            LEFT JOIN business_branding b ON b.tenant_id=t.id
+            LEFT JOIN (
+              SELECT tenant_id, MAX(id) AS latest_id
+              FROM feature_modules
+              WHERE branch_id IS NULL AND module_key='public_page'
+              GROUP BY tenant_id
+            ) fi ON fi.tenant_id=t.id
+            LEFT JOIN feature_modules f ON f.id=fi.latest_id
+            WHERE t.status='active' AND t.deleted_at IS NULL
+            ORDER BY LOWER(t.name)
+        """).fetchall()
+        result = [{
+            "name": row["display_name"] or row["name"],
+            "slug": row["slug"],
+            "logo_url": f"/api/public/branding/{row['id']}/logo" if row["logo_mime"] else None,
+            "welcome_text": row["welcome_text"] or "Conoce sus beneficios y promociones.",
+        } for row in tenants if module_flag(row["public_page_enabled"], True)]
     return result
 
 @app.get("/poster/{slug}", include_in_schema=False)
@@ -4330,7 +4348,10 @@ def notification_stream(after_id: int | None = None,
     with connection() as con:
         if after_id is None:
             row = con.execute("SELECT COALESCE(MAX(n.id),0) AS latest " + from_sql + filters, params).fetchone()
-            return {"last_id": int(row[0] or 0), "items": []}
+            # Some PostgreSQL-compatible drivers can return no row for an
+            # empty joined notification stream. Treat that the same as an
+            # empty stream instead of raising while the panel loads.
+            return {"last_id": int((row[0] if row else 0) or 0), "items": []}
         rows = con.execute(query + " AND n.id>? ORDER BY n.id LIMIT 30", (*params, max(0, after_id))).fetchall()
     return {"last_id": rows[-1]["id"] if rows else after_id, "items": [row_dict(row) for row in rows]}
 
@@ -4343,8 +4364,9 @@ def customer_notification_stream(after_id: int | None = None, customer=Depends(c
         if not module_enabled(con, customer["tenant_id"], "notifications", customer.get("origin_branch_id")):
             return {"last_id": after_id or 0, "items": []}
         if after_id is None:
-            latest = con.execute("SELECT MAX(id) latest FROM notifications WHERE tenant_id=? AND customer_id=?",
-                                 (customer["tenant_id"], customer["id"])).fetchone()["latest"] or 0
+            row = con.execute("SELECT MAX(id) latest FROM notifications WHERE tenant_id=? AND customer_id=?",
+                              (customer["tenant_id"], customer["id"])).fetchone()
+            latest = (row["latest"] if row else 0) or 0
             return {"last_id": latest, "items": []}
         rows = con.execute("""SELECT id,title,message,event_type,image_url FROM notifications
             WHERE tenant_id=? AND customer_id=? AND id>? ORDER BY id LIMIT 30""",
