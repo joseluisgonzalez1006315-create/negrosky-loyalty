@@ -678,3 +678,16 @@ body.brand-customer #customer-profile-tools{z-index:100!important}
 
 /* Build 259: elimina navegación decorativa duplicada del hero; la fila inferior es la navegación funcional */
 body.brand-customer .customer-hero-meta,.preview-surface .customer-hero-meta{display:none!important}
+
+/* Portal compacto: los negocios aparecen primero en pantalla */
+.customer-directory{padding-top:14px;padding-bottom:28px}
+.customer-directory .directory-hero{padding:20px 22px;margin-bottom:12px}
+.customer-directory .directory-hero .eyebrow{margin:2px 0 3px}
+.customer-directory .directory-hero h1{font-size:clamp(1.7rem,6vw,2.35rem);margin:0}
+.customer-directory .directory-hero .muted{margin:6px 0 0}
+.customer-directory .directory-businesses{margin-top:0}
+.customer-directory .directory-login{margin-top:18px;padding:18px 20px}
+.customer-directory .directory-login h2{margin:0;font-size:1.25rem}
+.customer-directory .directory-login p{margin:5px 0}
+.customer-directory .directory-login form{margin-top:12px;gap:10px}
+@media(max-width:520px){.customer-directory{padding-left:12px;padding-right:12px}.customer-directory .directory-hero{padding:17px 16px}.customer-directory .directory-section-heading{margin-bottom:13px}.customer-directory .directory-section-heading h2{font-size:1.45rem}.customer-directory .directory-login{padding:16px;margin-top:16px}}
